@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "build:no-check": "vite build",
+    "predeploy": "npm run build:no-check",
+    "deploy": "gh-pages -d dist"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

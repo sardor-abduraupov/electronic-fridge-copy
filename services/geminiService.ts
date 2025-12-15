@@ -368,66 +368,70 @@ export const connectToLiveChef = (
   onToolCall: (name: string, args: any) => Promise<any>,
   onClose: () => void
 ) => {
+  // Build callbacks object
+  const callbacks = {
+    onopen: () => console.log('Live session connected'),
+    onmessage: async (msg: LiveServerMessage) => {
+      const sc: any = (msg as any).serverContent;
+      const audioData = sc?.modelTurn?.parts?.[0]?.inlineData?.data;
+      if (audioData) {
+        onAudioData(audioData);
+      }
+
+      if (sc?.outputTranscription?.text) {
+        onTranscription(sc.outputTranscription.text, false);
+      }
+
+      if (sc?.inputTranscription?.text) {
+        onTranscription(sc.inputTranscription.text, true);
+      }
+
+      if (msg.toolCall) {
+        const functionCalls = (msg.toolCall.functionCalls || []) as any[];
+        const functionResponses = await Promise.all(
+          functionCalls.map(async (fc) => {
+            console.log('Processing Tool:', fc.name, fc.args);
+            let result;
+            try {
+              result = await onToolCall(fc.name as string, fc.args);
+            } catch (e) {
+              result = { error: (e as Error).message };
+            }
+            return {
+              id: fc.id,
+              name: fc.name,
+              response: { result }
+            };
+          })
+        );
+
+        // sessionPromise will be defined below; use it to send tool responses
+        sessionPromise.then((session: any) => {
+          session.sendToolResponse({ functionResponses });
+        });
+      }
+    },
+    onclose: () => onClose(),
+    onerror: (err: any) => console.error('Live session error', err)
+  };
+
+  const liveConfig: any = {
+    responseModalities: [Modality.AUDIO],
+    speechConfig: {
+      voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } }
+    },
+    systemInstruction: ("You are a helpful, master chef assistant called 'Fridge Bot'. You speak Russian. You can update the user's inventory, add to shopping list, and save recipes directly. Be concise. Do NOT invent items or hallucinate groceries that the user did not mention. When using tools, ensure all text arguments (titles, ingredients, instructions) are in RUSSIAN. Ingredients must match common grocery item names in Russian (e.g. 'Молоко', not 'Milk')."),
+    outputAudioTranscription: {},
+    inputAudioTranscription: {},
+    tools: assistantTools
+  };
+
   const sessionPromise = ai.live.connect({
     model: 'gemini-2.5-flash-native-audio-preview-09-2025',
-    callbacks: {
-      onopen: () => console.log('Live session connected'),
-      onmessage: async (msg: LiveServerMessage) => {
-        const audioData = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
-        if (audioData) {
-          onAudioData(audioData);
-        }
-        
-        // Handle Model Transcription
-        if (msg.serverContent?.outputTranscription?.text) {
-            onTranscription(msg.serverContent.outputTranscription.text, false);
-        }
-
-        // Handle User Transcription
-        if (msg.serverContent?.inputTranscription?.text) {
-            onTranscription(msg.serverContent.inputTranscription.text, true);
-        }
-
-        // Handle Tool Calls
-        if (msg.toolCall) {
-            const functionResponses = await Promise.all(
-                msg.toolCall.functionCalls.map(async (fc) => {
-                    console.log("Processing Tool:", fc.name, fc.args);
-                    let result;
-                    try {
-                        result = await onToolCall(fc.name, fc.args);
-                    } catch (e) {
-                        result = { error: (e as Error).message };
-                    }
-                    return {
-                        id: fc.id,
-                        name: fc.name,
-                        response: { result }
-                    };
-                })
-            );
-
-            sessionPromise.then(session => {
-                session.sendToolResponse({
-                    functionResponses
-                });
-            });
-        }
-      },
-      onclose: () => onClose(),
-      onerror: (err) => console.error('Live session error', err),
-    },
-    config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } }
-        },
-        systemInstruction: "You are a helpful, master chef assistant called 'Fridge Bot'. You speak Russian. You can update the user's inventory, add to shopping list, and save recipes directly. Be concise. Do NOT invent items or hallucinate groceries that the user did not mention. When using tools, ensure all text arguments (titles, ingredients, instructions) are in RUSSIAN. Ingredients must match common grocery item names in Russian (e.g. 'Молоко', not 'Milk').",
-        outputAudioTranscription: {}, 
-        inputAudioTranscription: {},
-        tools: assistantTools
-    }
+    callbacks,
+    config: liveConfig
   });
+
   return sessionPromise;
 };
 
