@@ -3,7 +3,11 @@ import { InventoryItem, ShoppingItem, Recipe, ExpenseRecord } from '../types';
 // Using https://jsonblob.com as a free, serverless backend
 // In development we proxy `/jsonblob` to the remote API to avoid CORS issues.
 // The proxy is configured in `vite.config.ts` so browser requests stay same-origin.
-const BLOB_API_URL = "/jsonblob";
+// For production (GitHub Pages) we must call the remote API directly — otherwise
+// a POST/PUT to the site root will return 405 (method not allowed) because Pages
+// only serves static files. Use the real jsonblob API path in production.
+const isProd = (typeof import.meta !== 'undefined') && !!((import.meta as any).env && (import.meta as any).env.PROD);
+const BLOB_API_URL = isProd ? 'https://jsonblob.com/api/jsonBlob' : '/jsonblob';
 
 export interface AppState {
   inventory: InventoryItem[];
