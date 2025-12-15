@@ -1,0 +1,9 @@
+{
+  "name": "Electronic Fridge",
+  "description": "A smart inventory management app powered by Gemini AI for receipt scanning, voice input, and smart shopping lists.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
