@@ -268,49 +268,49 @@ const LiveAssistant: React.FC<Props> = ({ isActive, onClose, onToolUse }) => {
       nextStartTimeRef.current = 0;
 
       const session = await connectToLiveChef(
-        async (base64Audio) => {
-           if (!audioContextRef.current || audioContextRef.current.state === 'closed') return;
+        // async (base64Audio) => {
+        //    if (!audioContextRef.current || audioContextRef.current.state === 'closed') return;
            
-           nextStartTimeRef.current = Math.max(nextStartTimeRef.current, audioContextRef.current.currentTime);
+        //    nextStartTimeRef.current = Math.max(nextStartTimeRef.current, audioContextRef.current.currentTime);
            
-           try {
-               const audioBuffer = await decodeAudioData(
-                   decode(base64Audio),
-                   audioContextRef.current,
-                   24000,
-                   1
-               );
+        //    try {
+        //        const audioBuffer = await decodeAudioData(
+        //            decode(base64Audio),
+        //            audioContextRef.current,
+        //            24000,
+        //            1
+        //        );
                
-               const source = audioContextRef.current.createBufferSource();
-               source.buffer = audioBuffer;
-               // Connect to Analyser which connects to destination
-               if (outputAnalyserRef.current) {
-                   source.connect(outputAnalyserRef.current);
-               } else {
-                   source.connect(audioContextRef.current.destination);
-               }
+        //        const source = audioContextRef.current.createBufferSource();
+        //        source.buffer = audioBuffer;
+        //        // Connect to Analyser which connects to destination
+        //        if (outputAnalyserRef.current) {
+        //            source.connect(outputAnalyserRef.current);
+        //        } else {
+        //            source.connect(audioContextRef.current.destination);
+        //        }
                
-               source.addEventListener('ended', () => {
-                 sourcesRef.current.delete(source);
-               });
+        //        source.addEventListener('ended', () => {
+        //          sourcesRef.current.delete(source);
+        //        });
                
-               source.start(nextStartTimeRef.current);
-               nextStartTimeRef.current += audioBuffer.duration;
-               sourcesRef.current.add(source);
-           } catch (e) {
-               console.error("Audio decode error:", e);
-           }
-        },
-        (text, isUser) => {
-            setTranscripts(prev => [...prev, { user: isUser, text }]);
-        },
-        async (name, args) => {
-            return await toolCallbackRef.current(name, args);
-        },
-        () => {
-            setIsConnected(false);
-            setStatusText("Отключено");
-        }
+        //        source.start(nextStartTimeRef.current);
+        //        nextStartTimeRef.current += audioBuffer.duration;
+        //        sourcesRef.current.add(source);
+        //    } catch (e) {
+        //        console.error("Audio decode error:", e);
+        //    }
+        // },
+        // (text, isUser) => {
+        //     setTranscripts(prev => [...prev, { user: isUser, text }]);
+        // },
+        // async (name, args) => {
+        //     return await toolCallbackRef.current(name, args);
+        // },
+        // () => {
+        //     setIsConnected(false);
+        //     setStatusText("Отключено");
+        // }
       );
 
       sessionRef.current = session;
