@@ -81,10 +81,10 @@ const assistantTools: Tool[] = [
           type: Type.OBJECT,
           properties: {
             title: { type: Type.STRING, description: "Title of the recipe in RUSSIAN." },
-            ingredients: { 
-                type: Type.ARRAY, 
-                items: { type: Type.STRING }, 
-                description: "List of ingredients in RUSSIAN. Format: 'Quantity Name' (e.g. '3 яйца', '200мл молока'). Must match common Russian grocery names." 
+            ingredients: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description: "List of ingredients in RUSSIAN. Format: 'Quantity Name' (e.g. '3 яйца', '200мл молока'). Must match common Russian grocery names."
             },
             instructions: { type: Type.STRING, description: "Detailed, step-by-step cooking instructions in RUSSIAN." },
             cookingTime: { type: Type.NUMBER, description: "Time in minutes" }
@@ -238,224 +238,224 @@ export const parseVoiceInput = async (audioBase64: string, mimeType: string = 'a
 
 // --- 3. Smart Item Identification (Manual Add) ---
 export const getSmartItemDetails = async (itemName: string): Promise<{ category: Category, imageKeyword: string }> => {
-    const schema: Schema = {
-        type: Type.OBJECT,
-        properties: {
-            category: { type: Type.STRING, enum: ['Produce', 'Fruits', 'Dairy', 'Meat', 'Pantry', 'Beverages', 'Frozen', 'Other'] },
-            imageKeyword: { type: Type.STRING, description: "English translation of the item for image search (e.g. 'cucumber')" }
-        },
-        required: ['category', 'imageKeyword']
-    };
+  const schema: Schema = {
+    type: Type.OBJECT,
+    properties: {
+      category: { type: Type.STRING, enum: ['Produce', 'Fruits', 'Dairy', 'Meat', 'Pantry', 'Beverages', 'Frozen', 'Other'] },
+      imageKeyword: { type: Type.STRING, description: "English translation of the item for image search (e.g. 'cucumber')" }
+    },
+    required: ['category', 'imageKeyword']
+  };
 
-    let response;
-    try {
+  let response;
+  try {
+    response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: `Identify the grocery category for "${itemName}" and provide its English translation for image searching.`,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: schema
+      }
+    });
+  } catch (e) {
+    if (isOverloadedError(e)) {
+      try {
         response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: `Identify the grocery category for "${itemName}" and provide its English translation for image searching.`,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: schema
-            }
+          model: 'gemini-1.5-pro',
+          contents: `Identify the grocery category for "${itemName}" and provide its English translation for image searching.`,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: schema
+          }
         });
-    } catch (e) {
-        if (isOverloadedError(e)) {
-            try {
-                response = await ai.models.generateContent({
-                    model: 'gemini-1.5-pro',
-                    contents: `Identify the grocery category for "${itemName}" and provide its English translation for image searching.`,
-                    config: {
-                        responseMimeType: "application/json",
-                        responseSchema: schema
-                    }
-                });
-            } catch (e2) {
-                console.error("Smart identification failed", e2);
-                // Fallback
-                return { category: 'Other', imageKeyword: 'grocery' };
-            }
-        } else {
-            console.error("Smart identification failed", e);
-            // Fallback
-            return { category: 'Other', imageKeyword: 'grocery' };
-        }
+      } catch (e2) {
+        console.error("Smart identification failed", e2);
+        // Fallback
+        return { category: 'Other', imageKeyword: 'grocery' };
+      }
+    } else {
+      console.error("Smart identification failed", e);
+      // Fallback
+      return { category: 'Other', imageKeyword: 'grocery' };
     }
-    if (response && response.text) {
-        return JSON.parse(cleanJson(response.text));
-    }
-    // Fallback
-    return { category: 'Other', imageKeyword: 'grocery' };
+  }
+  if (response && response.text) {
+    return JSON.parse(cleanJson(response.text));
+  }
+  // Fallback
+  return { category: 'Other', imageKeyword: 'grocery' };
 };
 
 // --- 4. Generate Recipe for Ingredient (gemini-2.5-flash) ---
 interface GeneratedRecipeData {
-    title: string;
-    ingredients: { name: string; quantity: string; }[];
-    instructions: string[];
-    imageKeyword: string;
-    cookingTime: number;
+  title: string;
+  ingredients: { name: string; quantity: string; }[];
+  instructions: string[];
+  imageKeyword: string;
+  cookingTime: number;
 }
 
 export const generateRecipeForIngredient = async (ingredientName: string): Promise<GeneratedRecipeData> => {
-    const schema: Schema = {
-        type: Type.OBJECT,
-        properties: {
-            title: { type: Type.STRING, description: "Название рецепта на русском языке" },
-            ingredients: {
-                type: Type.ARRAY,
-                items: {
-                    type: Type.OBJECT,
-                    properties: {
-                        name: { type: Type.STRING, description: "Название ингредиента на русском" },
-                        quantity: { type: Type.STRING, description: "Количество (например: 200гр, 1 ст.л)" },
-                    },
-                    required: ['name', 'quantity']
-                }
-            },
-            instructions: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING, description: "Шаг приготовления на русском" }
-            },
-            imageKeyword: { type: Type.STRING, description: "Short English keyword for image search (e.g. 'borsch', 'pancakes')" },
-            cookingTime: { type: Type.INTEGER, description: "Total cooking time in minutes" }
-        },
-        required: ['title', 'ingredients', 'instructions', 'imageKeyword', 'cookingTime']
-    };
+  const schema: Schema = {
+    type: Type.OBJECT,
+    properties: {
+      title: { type: Type.STRING, description: "Название рецепта на русском языке" },
+      ingredients: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            name: { type: Type.STRING, description: "Название ингредиента на русском" },
+            quantity: { type: Type.STRING, description: "Количество (например: 200гр, 1 ст.л)" },
+          },
+          required: ['name', 'quantity']
+        }
+      },
+      instructions: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING, description: "Шаг приготовления на русском" }
+      },
+      imageKeyword: { type: Type.STRING, description: "Short English keyword for image search (e.g. 'borsch', 'pancakes')" },
+      cookingTime: { type: Type.INTEGER, description: "Total cooking time in minutes" }
+    },
+    required: ['title', 'ingredients', 'instructions', 'imageKeyword', 'cookingTime']
+  };
 
-    let response;
-    try {
-        response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: `Create a popular, delicious recipe that uses the ingredient: "${ingredientName}". 
+  let response;
+  try {
+    response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: `Create a popular, delicious recipe that uses the ingredient: "${ingredientName}". 
             The recipe MUST be in Russian.
             Include a short English keyword that describes the dish visually for image search.
             Provide a realistic cooking time estimate in minutes.`,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: schema,
-            }
-        });
-    } catch (e) {
-        if (isOverloadedError(e)) {
-            try {
-                response = await ai.models.generateContent({
-                    model: 'gemini-1.5-pro',
-                    contents: `Create a popular, delicious recipe that uses the ingredient: "${ingredientName}". 
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: schema,
+      }
+    });
+  } catch (e) {
+    if (isOverloadedError(e)) {
+      try {
+        response = await ai.models.generateContent({
+          model: 'gemini-1.5-pro',
+          contents: `Create a popular, delicious recipe that uses the ingredient: "${ingredientName}". 
                     The recipe MUST be in Russian.
                     Include a short English keyword that describes the dish visually for image search.
                     Provide a realistic cooking time estimate in minutes.`,
-                    config: {
-                        responseMimeType: "application/json",
-                        responseSchema: schema,
-                    }
-                });
-            } catch (e2) {
-                console.error("Recipe generation failed:", e2);
-                throw new Error("Не удалось создать рецепт");
-            }
-        } else {
-            console.error("Recipe generation failed:", e);
-            throw new Error("Не удалось создать рецепт");
-        }
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: schema,
+          }
+        });
+      } catch (e2) {
+        console.error("Recipe generation failed:", e2);
+        throw new Error("Не удалось создать рецепт");
+      }
+    } else {
+      console.error("Recipe generation failed:", e);
+      throw new Error("Не удалось создать рецепт");
     }
-    if (response && response.text) {
-        return JSON.parse(cleanJson(response.text));
-    }
-    throw new Error("Не удалось создать рецепт");
+  }
+  if (response && response.text) {
+    return JSON.parse(cleanJson(response.text));
+  }
+  throw new Error("Не удалось создать рецепт");
 }
 
 // --- 5. Parse Recipe from Text/URL (gemini-2.5-flash) ---
 export const parseRecipe = async (input: string): Promise<Omit<Recipe, 'id' | 'timesCooked' | 'rating'> & { imageKeyword?: string }> => {
-    const schema: Schema = {
-        type: Type.OBJECT,
-        properties: {
-            title: { type: Type.STRING, description: "Title in Russian" },
-            ingredients: {
-                type: Type.ARRAY,
-                items: {
-                    type: Type.OBJECT,
-                    properties: {
-                        name: { type: Type.STRING, description: "In Russian" },
-                        quantity: { type: Type.STRING },
-                        category: { type: Type.STRING, enum: ['Produce', 'Fruits', 'Dairy', 'Meat', 'Pantry', 'Beverages', 'Frozen', 'Other'] }
-                    },
-                    required: ['name', 'quantity']
-                }
-            },
-            instructions: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING, description: "In Russian" }
-            },
-            imageKeyword: { type: Type.STRING, description: "English visual keyword" },
-            cookingTime: { type: Type.INTEGER, description: "Cooking time in minutes" }
-        },
-        required: ['title', 'ingredients', 'instructions', 'imageKeyword', 'cookingTime']
-    };
+  const schema: Schema = {
+    type: Type.OBJECT,
+    properties: {
+      title: { type: Type.STRING, description: "Title in Russian" },
+      ingredients: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            name: { type: Type.STRING, description: "In Russian" },
+            quantity: { type: Type.STRING },
+            category: { type: Type.STRING, enum: ['Produce', 'Fruits', 'Dairy', 'Meat', 'Pantry', 'Beverages', 'Frozen', 'Other'] }
+          },
+          required: ['name', 'quantity']
+        }
+      },
+      instructions: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING, description: "In Russian" }
+      },
+      imageKeyword: { type: Type.STRING, description: "English visual keyword" },
+      cookingTime: { type: Type.INTEGER, description: "Cooking time in minutes" }
+    },
+    required: ['title', 'ingredients', 'instructions', 'imageKeyword', 'cookingTime']
+  };
 
-    let response;
-    try {
-        response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: `Extract a structured recipe from the following input. If the input is just a name (e.g. "Carbonara"), generate a standard recipe for it. 
+  let response;
+  try {
+    response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: `Extract a structured recipe from the following input. If the input is just a name (e.g. "Carbonara"), generate a standard recipe for it. 
             ENSURE OUTPUT IS IN RUSSIAN.
             Input: ${input}`,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: schema,
-            }
-        });
-    } catch (e) {
-        if (isOverloadedError(e)) {
-            try {
-                response = await ai.models.generateContent({
-                    model: 'gemini-1.5-pro',
-                    contents: `Extract a structured recipe from the following input. If the input is just a name (e.g. "Carbonara"), generate a standard recipe for it. 
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: schema,
+      }
+    });
+  } catch (e) {
+    if (isOverloadedError(e)) {
+      try {
+        response = await ai.models.generateContent({
+          model: 'gemini-1.5-pro',
+          contents: `Extract a structured recipe from the following input. If the input is just a name (e.g. "Carbonara"), generate a standard recipe for it. 
                     ENSURE OUTPUT IS IN RUSSIAN.
                     Input: ${input}`,
-                    config: {
-                        responseMimeType: "application/json",
-                        responseSchema: schema,
-                    }
-                });
-            } catch (e2) {
-                throw new Error("Failed to parse recipe");
-            }
-        } else {
-            throw new Error("Failed to parse recipe");
-        }
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: schema,
+          }
+        });
+      } catch (e2) {
+        throw new Error("Failed to parse recipe");
+      }
+    } else {
+      throw new Error("Failed to parse recipe");
     }
-    if (response && response.text) {
-        const data = JSON.parse(cleanJson(response.text));
-        // Map data to match Recipe interface (handling potential extra fields from schema)
-        return {
-            title: data.title,
-            ingredients: data.ingredients,
-            instructions: data.instructions,
-            imageUrl: `https://loremflickr.com/400/300/${encodeURIComponent(data.imageKeyword || 'food')}`,
-            imageKeyword: data.imageKeyword,
-            cookingTime: data.cookingTime || 30
-        };
-    }
-    throw new Error("Failed to parse recipe");
+  }
+  if (response && response.text) {
+    const data = JSON.parse(cleanJson(response.text));
+    // Map data to match Recipe interface (handling potential extra fields from schema)
+    return {
+      title: data.title,
+      ingredients: data.ingredients,
+      instructions: data.instructions,
+      imageUrl: `https://loremflickr.com/400/300/${encodeURIComponent(data.imageKeyword || 'food')}`,
+      imageKeyword: data.imageKeyword,
+      cookingTime: data.cookingTime || 30
+    };
+  }
+  throw new Error("Failed to parse recipe");
 };
 
 // --- Helper: AI-powered image keyword extraction ---
 const inferImageKeywordWithAI = async (input: string): Promise<string> => {
-    const schema: Schema = {
-        type: Type.OBJECT,
-        properties: {
-            keyword: {
-                type: Type.STRING,
-                description:
-                    "Single concrete English food noun suitable for image search (e.g. 'eggs', 'sourdough bread', 'chicken breast', 'ramen'). No adjectives, no brands."
-            }
-        },
-        required: ["keyword"]
-    };
+  const schema: Schema = {
+    type: Type.OBJECT,
+    properties: {
+      keyword: {
+        type: Type.STRING,
+        description:
+          "Single concrete English food noun suitable for image search (e.g. 'eggs', 'sourdough bread', 'chicken breast', 'ramen'). No adjectives, no brands."
+      }
+    },
+    required: ["keyword"]
+  };
 
-    try {
-        const res = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: `Extract ONE concrete food keyword in English for image search.
+  try {
+    const res = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: `Extract ONE concrete food keyword in English for image search.
 Input: "${input}"
 Rules:
 - Output ONE noun phrase
@@ -463,100 +463,100 @@ Rules:
 - No brands
 - No packaging
 - No explanations`,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: schema
-            }
-        });
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: schema
+      }
+    });
 
-        if (res.text) {
-            const parsed = JSON.parse(cleanJson(res.text));
-            if (parsed.keyword && typeof parsed.keyword === "string") {
-                return parsed.keyword.toLowerCase();
-            }
-        }
-    } catch (e) {
-        // ignore AI failure
+    if (res.text) {
+      const parsed = JSON.parse(cleanJson(res.text));
+      if (parsed.keyword && typeof parsed.keyword === "string") {
+        return parsed.keyword.toLowerCase();
+      }
     }
+  } catch (e) {
+    // ignore AI failure
+  }
 
-    return "food";
+  return "food";
 };
 
 // --- 6. AI Image Search Keyword Selection (AI for food concept, public image for photo) ---
 export const generateGroceryImage = async (prompt: string): Promise<string | null> => {
-    // 1) Normalize prompt to a small keyword
-    const normalize = (s: string) => {
-        if (!s) return '';
-        let t = s.toLowerCase().trim();
-        // remove punctuation
-        t = t.replace(/["'`…«»(),.?!:;\/\\]/g, '');
-        // replace multiple spaces
-        t = t.replace(/\s+/g, ' ');
-        return t;
-    };
+  // 1) Normalize prompt to a small keyword
+  const normalize = (s: string) => {
+    if (!s) return '';
+    let t = s.toLowerCase().trim();
+    // remove punctuation
+    t = t.replace(/["'`…«»(),.?!:;\/\\]/g, '');
+    // replace multiple spaces
+    t = t.replace(/\s+/g, ' ');
+    return t;
+  };
 
-    const keyword = normalize(prompt).split(' ')[0] || 'food';
+  const keyword = normalize(prompt).split(' ')[0] || 'food';
 
-    // 2) curated mapping for common grocery items to more precise search keywords
-    const curated: Record<string, string> = {
-        egg: 'eggs',
-        eggs: 'eggs',
-        milk: 'milk',
-        bread: 'bread',
-        butter: 'butter',
-        cheese: 'cheese',
-        apple: 'apples',
-        apples: 'apples',
-        banana: 'bananas',
-        tomato: 'tomato',
-        tomatoes: 'tomatoes',
-        cucumber: 'cucumber',
-        rice: 'rice',
-        chicken: 'chicken',
-        pork: 'pork',
-        beef: 'beef',
-        yogurt: 'yogurt',
-        coffee: 'coffee',
-        tea: 'tea',
-        orange: 'orange',
-        potato: 'potato',
-        potatoes: 'potatoes',
-        onion: 'onion',
-        garlic: 'garlic',
-        applejuice: 'apple juice',
-        juice: 'juice',
-        cereal: 'cereal'
-    };
+  // 2) curated mapping for common grocery items to more precise search keywords
+  const curated: Record<string, string> = {
+    egg: 'eggs',
+    eggs: 'eggs',
+    milk: 'milk',
+    bread: 'bread',
+    butter: 'butter',
+    cheese: 'cheese',
+    apple: 'apples',
+    apples: 'apples',
+    banana: 'bananas',
+    tomato: 'tomato',
+    tomatoes: 'tomatoes',
+    cucumber: 'cucumber',
+    rice: 'rice',
+    chicken: 'chicken',
+    pork: 'pork',
+    beef: 'beef',
+    yogurt: 'yogurt',
+    coffee: 'coffee',
+    tea: 'tea',
+    orange: 'orange',
+    potato: 'potato',
+    potatoes: 'potatoes',
+    onion: 'onion',
+    garlic: 'garlic',
+    applejuice: 'apple juice',
+    juice: 'juice',
+    cereal: 'cereal'
+  };
 
-    let key = curated[keyword];
+  let key = curated[keyword];
 
-    if (!key) {
-        key = await inferImageKeywordWithAI(prompt);
-    }
+  if (!key) {
+    key = await inferImageKeywordWithAI(prompt);
+  }
 
-    // 3) Candidate public image sources (no API key required)
-    // - source.unsplash.com returns a relevant image for a keyword
-    // - loremflickr is a fallback that uses the keyword
-    // We return the first candidate URL; the browser will fetch it.
+  // 3) Candidate public image sources (no API key required)
+  // - source.unsplash.com returns a relevant image for a keyword
+  // - loremflickr is a fallback that uses the keyword
+  // We return the first candidate URL; the browser will fetch it.
 
-    // Use Unsplash Source (no API key) — good quality and relevant
-    const unsplash = `https://source.unsplash.com/800x600/?${encodeURIComponent(key)}`;
+  // Use Unsplash Source (no API key) — good quality and relevant
+  const unsplash = `https://source.unsplash.com/800x600/?${encodeURIComponent(key)}`;
 
-    // Fallback to LoremFlickr (keyword-based)
-    const lorem = `https://loremflickr.com/800/600/${encodeURIComponent(key)}`;
+  // Fallback to LoremFlickr (keyword-based)
+  const lorem = `https://loremflickr.com/800/600/${encodeURIComponent(key)}`;
 
-    // Final fallback: a neutral food placeholder
-    const placeholder = `https://loremflickr.com/800/600/food`;
+  // Final fallback: a neutral food placeholder
+  const placeholder = `https://loremflickr.com/800/600/food`;
 
+  try {
+    return unsplash;
+  } catch (e) {
     try {
-        return unsplash;
-    } catch (e) {
-        try {
-            return lorem;
-        } catch (e2) {
-            return placeholder;
-        }
+      return lorem;
+    } catch (e2) {
+      return placeholder;
     }
+  }
 };
 
 // --- 7. Live Connection Factory ---
@@ -618,8 +618,84 @@ export const connectToLiveChef = (
     speechConfig: {
       voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } }
     },
-    systemInstruction: ("You are a helpful, master chef assistant called 'Fridge Bot'. You speak Russian. You can update the user's inventory, add to shopping list, and save recipes directly. Be concise. Do NOT invent items or hallucinate groceries that the user did not mention. When using tools, ensure all text arguments (titles, ingredients, instructions) are in RUSSIAN. Ingredients must match common grocery item names in Russian (e.g. 'Молоко', not 'Milk')."),
-    outputAudioTranscription: {},
+    systemInstruction: (`
+Ты — голосовой ассистент приложения для учета продуктов и покупок.
+Ты ВСЕГДА говоришь ТОЛЬКО по-русски.
+
+====================
+ГЛАВНОЕ ПРАВИЛО
+====================
+Ты НЕ гадаешь и НЕ импровизируешь.
+Ты строго следуешь правилам ниже.
+
+====================
+ПРАВИЛА НАМЕРЕНИЙ (ОБЯЗАТЕЛЬНО)
+====================
+
+1. Если пользователь говорит:
+   "я купил", "я купила", "я взял", "я взяла", "купил", "купила"
+   → продукт УЖЕ КУПЛЕН
+   → ТЫ ОБЯЗАН вызвать updateInventory
+   → ТЫ ЗАПРЕЩЕНО вызывать addToShoppingList
+
+2. Если пользователь говорит:
+   "добавь", "нужно купить", "надо купить", "в список", "добавь в список"
+   → это СПИСОК ПОКУПОК
+   → ТЫ ОБЯЗАН вызвать addToShoppingList
+   → ТЫ ЗАПРЕЩЕНО вызывать updateInventory
+
+3. Если пользователь говорит ТОЛЬКО название продукта (например: "хлеб")
+   → считай, что это СПИСОК ПОКУПОК
+   → вызови addToShoppingList
+
+4. НИКОГДА не добавляй купленные продукты в список покупок.
+5. НИКОГДА не добавляй список покупок в купленные продукты.
+
+====================
+ПРАВИЛА ОБРАБОТКИ ПРОДУКТОВ
+====================
+
+6. КАЖДЫЙ продукт — ЭТО НОВЫЙ ОТДЕЛЬНЫЙ ОБЪЕКТ.
+   НИКОГДА не объединяй разные продукты.
+
+7. Количество и цена относятся ТОЛЬКО к продукту,
+   который был назван В ЭТОЙ ЖЕ ФРАЗЕ.
+
+8. Если указана цена (например: "за 3000 сум"):
+   → она относится ТОЛЬКО к этому продукту.
+
+9. Если количество НЕ указано:
+   → считай количество = 1.
+
+====================
+ПРАВИЛА ОТВЕТА
+====================
+
+10. ПОСЛЕ КАЖДОГО действия ты ОБЯЗАН ответить.
+
+Формат ответа (ПРИМЕРЫ):
+- "Готово. Хлеб добавлен в купленные продукты."
+- "Готово. Масло добавлено в купленные продукты."
+- "Готово. Перец добавлен в купленные продукты. Цена — 3000 сум."
+- "Хлеб добавлен в список покупок."
+
+11. ТЫ НИКОГДА НЕ МОЛЧИШЬ после выполнения действия.
+
+12. Если пользователь задал вопрос и инструмент не нужен:
+   → ответь кратко по-русски.
+
+====================
+ЗАПРЕТЫ
+====================
+
+- НЕ придумывай продукты
+- НЕ объединяй продукты
+- НЕ используй предыдущие продукты
+- НЕ гадай намерение
+- НЕ молчи
+
+Ты точный, предсказуемый и надёжный ассистент.
+`), outputAudioTranscription: {},
     inputAudioTranscription: {},
     tools: assistantTools
   };
@@ -635,64 +711,64 @@ export const connectToLiveChef = (
 
 // --- Re-export helpers ---
 export const categorizeBatch = async (itemNames: string[]): Promise<Record<string, Category>> => {
-    const uniqueNames = Array.from(new Set(itemNames));
-    if (uniqueNames.length === 0) return {};
-    
-    const schema: Schema = {
-        type: Type.OBJECT,
-        properties: {
-            categories: {
-                type: Type.ARRAY,
-                items: {
-                    type: Type.OBJECT,
-                    properties: {
-                        name: { type: Type.STRING },
-                        category: { type: Type.STRING, enum: ['Produce', 'Fruits', 'Dairy', 'Meat', 'Pantry', 'Beverages', 'Frozen', 'Other'] }
-                    },
-                    required: ['name', 'category']
-                }
-            }
-        },
-        required: ['categories']
-    };
+  const uniqueNames = Array.from(new Set(itemNames));
+  if (uniqueNames.length === 0) return {};
 
-    let response;
-    try {
-        response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: `Categorize these grocery items correctly. Items: ${uniqueNames.join(', ')}`,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: schema
-            }
-        });
-    } catch (e) {
-        if (isOverloadedError(e)) {
-            try {
-                response = await ai.models.generateContent({
-                    model: 'gemini-1.5-pro',
-                    contents: `Categorize these grocery items correctly. Items: ${uniqueNames.join(', ')}`,
-                    config: {
-                        responseMimeType: "application/json",
-                        responseSchema: schema
-                    }
-                });
-            } catch (e2) {
-                console.error("Batch categorization failed", e2);
-                return {};
-            }
-        } else {
-            console.error("Batch categorization failed", e);
-            return {};
+  const schema: Schema = {
+    type: Type.OBJECT,
+    properties: {
+      categories: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            name: { type: Type.STRING },
+            category: { type: Type.STRING, enum: ['Produce', 'Fruits', 'Dairy', 'Meat', 'Pantry', 'Beverages', 'Frozen', 'Other'] }
+          },
+          required: ['name', 'category']
         }
-    }
-    if (response && response.text) {
-        const data = JSON.parse(cleanJson(response.text));
-        const mapping: Record<string, Category> = {};
-        data.categories.forEach((item: any) => {
-            mapping[item.name] = item.category as Category;
+      }
+    },
+    required: ['categories']
+  };
+
+  let response;
+  try {
+    response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: `Categorize these grocery items correctly. Items: ${uniqueNames.join(', ')}`,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: schema
+      }
+    });
+  } catch (e) {
+    if (isOverloadedError(e)) {
+      try {
+        response = await ai.models.generateContent({
+          model: 'gemini-1.5-pro',
+          contents: `Categorize these grocery items correctly. Items: ${uniqueNames.join(', ')}`,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: schema
+          }
         });
-        return mapping;
+      } catch (e2) {
+        console.error("Batch categorization failed", e2);
+        return {};
+      }
+    } else {
+      console.error("Batch categorization failed", e);
+      return {};
     }
-    return {};
+  }
+  if (response && response.text) {
+    const data = JSON.parse(cleanJson(response.text));
+    const mapping: Record<string, Category> = {};
+    data.categories.forEach((item: any) => {
+      mapping[item.name] = item.category as Category;
+    });
+    return mapping;
+  }
+  return {};
 };

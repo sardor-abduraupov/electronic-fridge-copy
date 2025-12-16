@@ -573,13 +573,8 @@ export default function App() {
               newCategory = smartDetails.category;
           }
 
-          // 2. Generate Image
-          let newImageUrl = null;
-          const base64Image = await generateGroceryImage(smartDetails.imageKeyword || name);
-          
-          if (base64Image) {
-              newImageUrl = await compressImage(base64Image, 250, 0.65);
-          }
+          // 2. Generate Image (now returns URL)
+          const newImageUrl = await generateGroceryImage(smartDetails.imageKeyword || name);
 
           // 3. Update Inventory State silently
           setInventory(prev => prev.map(item => {
@@ -682,11 +677,12 @@ export default function App() {
       try {
           // Get smart keyword first for better prompt
           const smartDetails = await getSmartItemDetails(originalItem.name);
-          const base64Image = await generateGroceryImage(smartDetails.imageKeyword || originalItem.name);
+          const imageUrl = await generateGroceryImage(smartDetails.imageKeyword || originalItem.name);
           
-          if (base64Image) {
-              const compressed = await compressImage(base64Image, 250, 0.65);
-              setInventory(prev => prev.map(i => i.id === originalItem.id ? { ...i, imageUrl: compressed } : i));
+          if (imageUrl) {
+              setInventory(prev =>
+                  prev.map(i => i.id === originalItem.id ? { ...i, imageUrl } : i)
+              );
           } else {
               alert("Не удалось сгенерировать изображение.");
           }
@@ -727,12 +723,10 @@ export default function App() {
   const backgroundProcessRecipeImage = async (recipeId: string, title: string, keyword: string) => {
       try {
           const prompt = (keyword || title) + " dish meal";
-          const base64Image = await generateGroceryImage(prompt);
-          if (base64Image) {
-              const compressed = await compressImage(base64Image, 400, 0.7);
-              setRecipes(prev => prev.map(r => r.id === recipeId ? { ...r, imageUrl: compressed } : r));
-              // Also update selected recipe if it's currently open
-              setSelectedRecipe(curr => curr && curr.id === recipeId ? { ...curr, imageUrl: compressed } : curr);
+          const imageUrl = await generateGroceryImage(prompt);
+          if (imageUrl) {
+              setRecipes(prev => prev.map(r => r.id === recipeId ? { ...r, imageUrl } : r));
+              setSelectedRecipe(curr => curr && curr.id === recipeId ? { ...curr, imageUrl } : curr);
           }
       } catch (e) {
           console.error("Recipe image generation failed", e);
