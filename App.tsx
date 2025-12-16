@@ -436,7 +436,7 @@ export default function App() {
             id: Date.now().toString() + idx,
             name: i.name,
             quantity: i.quantity,
-            unit: i.unit || 'шт',
+            unit: i.unit,
             category: i.category,
             price: i.price,
             addedDate: new Date().toISOString().split('T')[0],
@@ -495,7 +495,7 @@ export default function App() {
                   id: 'voice-' + Date.now() + idx,
                   name: i.name,
                   quantity: i.quantity,
-                  unit: i.unit || 'шт',
+                  unit: i.unit,
                   category: i.category,
                   addedDate: new Date().toISOString().split('T')[0],
                   // Bulk add - use improved web search first
