@@ -48,7 +48,7 @@ import {
 } from 'lucide-react';
 import { InventoryItem, AppTab, ShoppingItem, Category, ExpenseRecord, Recipe } from './types';
 import { analyzeReceipt, parseVoiceInput, generateRecipeForIngredient, parseRecipe, categorizeBatch, getSmartItemDetails, generateGroceryImage } from './services/geminiService';
-import { createFamilyDatabase, fetchFamilyData, updateFamilyData, AppState } from './services/storageService';
+import { fetchFamilyData, updateFamilyData, AppState } from './services/storageService';
 import { ExpenseAnalytics } from './components/Charts';
 import LiveAssistant from './components/LiveAssistant';
 
@@ -209,8 +209,7 @@ export default function App() {
   const [expenses, setExpenses] = useStickyState<ExpenseRecord[]>([], 'ef_expenses_v4');
   const [dismissedItems, setDismissedItems] = useStickyState<string[]>([], 'ef_dismissed_v4');
   
-  // SHARED DATABASE STATE - UPDATED KEYS TO v4
-  const [familyId, setFamilyId] = useStickyState<string>('', 'ef_family_id_v4');
+  // SHARED DATABASE STATE (GLOBAL SINGLE BLOB)
   const [lastSyncTime, setLastSyncTime] = useStickyState<number>(0, 'ef_last_sync_v4');
   const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'offline'>('offline');
 
@@ -255,47 +254,11 @@ export default function App() {
   };
 
   // --- 0. AUTO-INIT CLOUD DATABASE (Silent) ---
-  const initializeCloud = async () => {
-        setSyncStatus('syncing');
-        if (!familyId) {
-            console.log("Initializing Silent Cloud Database...");
-            const newId = await createFamilyDatabase({
-                inventory,
-                shoppingList,
-                recipes,
-                expenses,
-                updatedAt: Date.now()
-            });
-            if (newId) {
-                setFamilyId(newId);
-                setSyncStatus('synced');
-            } else {
-                setSyncStatus('offline');
-            }
-        } else {
-            // Manual retry with existing ID
-            const success = await updateFamilyData(familyId, {
-                inventory,
-                shoppingList,
-                recipes,
-                expenses,
-                updatedAt: Date.now()
-            });
-            setSyncStatus(success ? 'synced' : 'offline');
-        }
-  };
-
-  useEffect(() => {
-    if (!familyId) {
-        initializeCloud();
-    }
-  }, [familyId]); 
 
   // --- 1. SYNC ENGINE (Push) ---
   useEffect(() => {
-    if (!familyId) return;
-
     setSyncStatus('syncing');
+
     const timeout = setTimeout(async () => {
       const currentState: AppState = {
         inventory,
@@ -304,46 +267,39 @@ export default function App() {
         expenses,
         updatedAt: Date.now()
       };
-      
-      if (currentState.updatedAt > lastSyncTime) {
-          const success = await updateFamilyData(familyId, currentState);
-          if (success) {
-            setLastSyncTime(currentState.updatedAt);
-            setSyncStatus('synced');
-          } else {
-            setSyncStatus('offline');
-          }
+
+      const success = await updateFamilyData(currentState);
+      if (success) {
+        setLastSyncTime(currentState.updatedAt);
+        setSyncStatus('synced');
       } else {
-          setSyncStatus('synced');
+        setSyncStatus('offline');
       }
     }, 2000);
 
     return () => clearTimeout(timeout);
-  }, [inventory, shoppingList, recipes, expenses, familyId]);
+  }, [inventory, shoppingList, recipes, expenses]);
 
   // --- 2. SYNC ENGINE (Poll) ---
   useEffect(() => {
-    if (!familyId) return;
-
     const poll = async () => {
-      const data = await fetchFamilyData(familyId);
-      if (data) {
-        if (data.updatedAt > lastSyncTime) {
-          console.log("Syncing from cloud...");
-          setInventory(data.inventory);
-          setShoppingList(data.shoppingList);
-          setRecipes(data.recipes);
-          setExpenses(data.expenses);
-          setLastSyncTime(data.updatedAt);
-        }
+      const data = await fetchFamilyData();
+      if (data && data.updatedAt > lastSyncTime) {
+        console.log("Syncing from cloud...");
+        setInventory(data.inventory);
+        setShoppingList(data.shoppingList);
+        setRecipes(data.recipes);
+        setExpenses(data.expenses);
+        setLastSyncTime(data.updatedAt);
+        setSyncStatus('synced');
       }
     };
 
-    const interval = setInterval(poll, 10000); 
-    poll(); 
+    const interval = setInterval(poll, 10000);
+    poll();
 
     return () => clearInterval(interval);
-  }, [familyId, lastSyncTime]);
+  }, [lastSyncTime]);
 
 
   // Derived state
@@ -1359,7 +1315,13 @@ export default function App() {
         title="Умный Холодильник" 
         onAssistant={() => setLiveAssistantOpen(true)} 
         onSmartOrganize={handleSmartOrganize} 
-        onRetrySync={initializeCloud}
+        onRetrySync={() => updateFamilyData({
+          inventory,
+          shoppingList,
+          recipes,
+          expenses,
+          updatedAt: Date.now()
+        })}
         syncStatus={syncStatus}
         theme={theme}
         toggleTheme={toggleTheme}
