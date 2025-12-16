@@ -1,13 +1,22 @@
 import { InventoryItem, ShoppingItem, Recipe, ExpenseRecord } from '../types';
 
 // Using https://jsonblob.com as a free, serverless backend
-// In development we proxy `/jsonblob` to the remote API to avoid CORS issues.
-// The proxy is configured in `vite.config.ts` so browser requests stay same-origin.
-// For production (GitHub Pages) we must call the remote API directly — otherwise
-// a POST/PUT to the site root will return 405 (method not allowed) because Pages
-// only serves static files. Use the real jsonblob API path in production.
+// Development: Vite dev server proxies `/jsonblob` to jsonblob to avoid CORS.
+// Production: jsonblob doesn't return CORS headers, so a browser request will be
+// blocked. The recommended production approach is to deploy a small proxy (Cloudflare
+// Worker, Netlify/Vercel function) that forwards requests to jsonblob and adds
+// Access-Control-Allow-Origin headers.
+// Replace WORKER_PROXY with your deployed worker URL, e.g.:
+// const WORKER_PROXY = 'https://my-fridge-proxy.workers.dev/jsonblob'
+const WORKER_PROXY = 'https://<your-worker>.workers.dev/jsonblob'; // <- REPLACE
+
 const isProd = (typeof import.meta !== 'undefined') && !!((import.meta as any).env && (import.meta as any).env.PROD);
-const BLOB_API_URL = isProd ? 'https://jsonblob.com/api/jsonBlob' : '/jsonblob';
+const BLOB_API_URL = isProd ? WORKER_PROXY : '/jsonblob';
+
+if (typeof window !== 'undefined') {
+  // eslint-disable-next-line no-console
+  console.info('[storageService] BLOB_API_URL =', BLOB_API_URL);
+}
 
 export interface AppState {
   inventory: InventoryItem[];
@@ -35,17 +44,27 @@ export const createFamilyDatabase = async (initialState: AppState): Promise<stri
       body: JSON.stringify(initialState),
     });
 
-    if (response.ok) {
+    if (response && response.ok) {
       // The Location header contains the URL to the new blob
       const location = response.headers.get("Location") || response.headers.get("location");
       if (location) {
         const parts = location.split('/');
         return parts[parts.length - 1];
       }
+    } else {
+      // Non-OK server response
+      // eslint-disable-next-line no-console
+      console.warn('[storageService] createFamilyDatabase: server responded with', response && response.status);
     }
   } catch (error) {
-    // Silently fail to avoid console spam during CORS blocks
-    console.debug("Cloud sync unavailable (Offline/CORS).");
+    // Network/CORS error — fallback to localStorage so app keeps working
+    // eslint-disable-next-line no-console
+    console.debug('Cloud sync unavailable (Network/CORS). Falling back to localStorage.', error);
+    try {
+      localStorage.setItem('fridge-cloud-backup', JSON.stringify(initialState));
+    } catch (e) {
+      // ignore localStorage failures
+    }
   }
   return null;
 };
@@ -62,11 +81,13 @@ export const fetchFamilyData = async (blobId: string): Promise<AppState | null> 
       }
     });
 
-    if (response.ok) {
+    if (response && response.ok) {
       return await response.json();
     }
   } catch (error) {
-    // Silent fail
+    // Network/CORS error — log and fall back to null so app uses local copy
+    // eslint-disable-next-line no-console
+    console.debug('fetchFamilyData failed (Network/CORS)', error);
   }
   return null;
 };
@@ -84,8 +105,17 @@ export const updateFamilyData = async (blobId: string, data: AppState): Promise<
       },
       body: JSON.stringify(data)
     });
-    return response.ok;
+    if (response && response.ok) return true;
   } catch (error) {
+    // Network/CORS error — persist locally and return false
+    try {
+      localStorage.setItem('fridge-cloud-backup', JSON.stringify(data));
+    } catch (e) {
+      // ignore
+    }
+    // eslint-disable-next-line no-console
+    console.debug('updateFamilyData failed (Network/CORS). Saved to local backup.', error);
     return false;
   }
+  return false;
 };
