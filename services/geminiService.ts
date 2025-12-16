@@ -601,12 +601,14 @@ export const connectToLiveChef = (
         onAudioData(audioData);
       }
 
-      if (sc?.outputTranscription?.text) {
-        onTranscription(sc.outputTranscription.text, false);
+      const outputText = sc?.outputTranscription?.text;
+      if (typeof outputText === "string" && outputText.trim().length > 0) {
+        onTranscription(outputText, false);
       }
 
-      if (sc?.inputTranscription?.text) {
-        onTranscription(sc.inputTranscription.text, true);
+      const inputText = sc?.inputTranscription?.text;
+      if (typeof inputText === "string" && inputText.trim().length > 0) {
+        onTranscription(inputText, true);
       }
 
       if (msg.toolCall) {
