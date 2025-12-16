@@ -1,16 +1,14 @@
 import { GoogleGenAI, Type, Schema, FunctionDeclaration, LiveServerMessage, Modality, Tool } from "@google/genai";
 import { Category, Recipe } from '../types';
 
-const getApiKey = () => {
-  // Robust check for API Key
-  if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
-    return process.env.API_KEY;
-  }
-  // Fallback or empty if not set (will cause API error but preventing crash on init)
-  return ""; 
-};
+// ===============================
+// DIRECT GEMINI API KEY (FRONTEND)
+// ===============================
+// NOTE: This key is intentionally embedded for direct browser use.
+// Replace the placeholder string with your real Gemini API key.
+const GEMINI_API_KEY = "AIzaSyBCshXJDXCoRO4x_uq-fcz8go6ae0XA6yE";
 
-const ai = new GoogleGenAI({ apiKey: getApiKey() });
+const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
 // --- Helper: Clean JSON Markdown ---
 const cleanJson = (text: string) => {
