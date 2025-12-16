@@ -79,6 +79,8 @@ const LiveAssistant: React.FC<Props> = ({ isActive, onClose, onToolUse }) => {
   const sessionRef = useRef<any>(null); 
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const streamRef = useRef<MediaStream | null>(null);
+  const lastVoiceTimeRef = useRef<number>(0);
+  const silenceTimeoutRef = useRef<number | null>(null);
 
   const toolCallbackRef = useRef(onToolUse);
   useEffect(() => {
@@ -302,10 +304,36 @@ const LiveAssistant: React.FC<Props> = ({ isActive, onClose, onToolUse }) => {
            }
         },
         (text, isUser) => {
+            if (typeof text !== 'string' || !text.trim()) return;
             setTranscripts(prev => [...prev, { user: isUser, text }]);
         },
         async (name, args) => {
-            return await toolCallbackRef.current(name, args);
+            try {
+                const result = await toolCallbackRef.current(name, args);
+
+                // Add explicit assistant confirmation message
+                setTranscripts(prev => [
+                  ...prev,
+                  {
+                    user: false,
+                    text: `Готово. Я выполнил действие: ${name}.`
+                  }
+                ]);
+
+                return result ?? { ok: true };
+            } catch (e) {
+                console.error("Tool execution failed:", e);
+
+                setTranscripts(prev => [
+                  ...prev,
+                  {
+                    user: false,
+                    text: `Произошла ошибка при выполнении действия: ${name}.`
+                  }
+                ]);
+
+                return { ok: false };
+            }
         },
         () => {
             setIsConnected(false);
@@ -330,6 +358,26 @@ const LiveAssistant: React.FC<Props> = ({ isActive, onClose, onToolUse }) => {
       processor.onaudioprocess = (e) => {
         if (!sessionRef.current) return;
         const inputData = e.inputBuffer.getChannelData(0);
+        // --- Silence-based end-of-speech detection ---
+        const now = Date.now();
+        const rms =
+          Math.sqrt(inputData.reduce((s, v) => s + v * v, 0) / inputData.length);
+
+        if (rms > 0.01) {
+          lastVoiceTimeRef.current = now;
+          if (silenceTimeoutRef.current) {
+            clearTimeout(silenceTimeoutRef.current);
+            silenceTimeoutRef.current = null;
+          }
+        } else if (!silenceTimeoutRef.current && lastVoiceTimeRef.current) {
+          silenceTimeoutRef.current = window.setTimeout(() => {
+            if (sessionRef.current?.endTurn) {
+              sessionRef.current.endTurn();
+            }
+            silenceTimeoutRef.current = null;
+          }, 700); // ~0.7s silence = finished speaking
+        }
+        // --- End silence-based logic ---
         const pcmBlob = createBlob(inputData);
         sessionRef.current.sendRealtimeInput({ media: pcmBlob });
       };
@@ -414,7 +462,7 @@ const LiveAssistant: React.FC<Props> = ({ isActive, onClose, onToolUse }) => {
                         ? 'bg-emerald-500/20 text-emerald-100 border border-emerald-500/20' 
                         : 'bg-violet-500/20 text-violet-100 border border-violet-500/20'
                     }`}>
-                        {t.text}
+                        {typeof t.text === 'string' ? t.text : ''}
                     </div>
                 </div>
             ))}

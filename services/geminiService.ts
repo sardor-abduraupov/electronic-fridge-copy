@@ -197,7 +197,7 @@ export const parseVoiceInput = async (audioBase64: string, mimeType: string = 'a
     if (isOverloadedError(error)) {
       try {
         response = await ai.models.generateContent({
-          model: 'gemini-1.5-flash',
+          model: 'gemini-1.5-pro',
           contents: {
             parts: [
               {
@@ -261,7 +261,7 @@ export const getSmartItemDetails = async (itemName: string): Promise<{ category:
         if (isOverloadedError(e)) {
             try {
                 response = await ai.models.generateContent({
-                    model: 'gemini-1.5-flash',
+                    model: 'gemini-1.5-pro',
                     contents: `Identify the grocery category for "${itemName}" and provide its English translation for image searching.`,
                     config: {
                         responseMimeType: "application/json",
@@ -338,7 +338,7 @@ export const generateRecipeForIngredient = async (ingredientName: string): Promi
         if (isOverloadedError(e)) {
             try {
                 response = await ai.models.generateContent({
-                    model: 'gemini-1.5-flash',
+                    model: 'gemini-1.5-pro',
                     contents: `Create a popular, delicious recipe that uses the ingredient: "${ingredientName}". 
                     The recipe MUST be in Russian.
                     Include a short English keyword that describes the dish visually for image search.
@@ -407,7 +407,7 @@ export const parseRecipe = async (input: string): Promise<Omit<Recipe, 'id' | 't
         if (isOverloadedError(e)) {
             try {
                 response = await ai.models.generateContent({
-                    model: 'gemini-1.5-flash',
+                    model: 'gemini-1.5-pro',
                     contents: `Extract a structured recipe from the following input. If the input is just a name (e.g. "Carbonara"), generate a standard recipe for it. 
                     ENSURE OUTPUT IS IN RUSSIAN.
                     Input: ${input}`,
@@ -438,31 +438,126 @@ export const parseRecipe = async (input: string): Promise<Omit<Recipe, 'id' | 't
     throw new Error("Failed to parse recipe");
 };
 
-// --- 6. AI Image Generation (gemini-2.5-flash-image) ---
-export const generateGroceryImage = async (prompt: string): Promise<string | null> => {
+// --- Helper: AI-powered image keyword extraction ---
+const inferImageKeywordWithAI = async (input: string): Promise<string> => {
+    const schema: Schema = {
+        type: Type.OBJECT,
+        properties: {
+            keyword: {
+                type: Type.STRING,
+                description:
+                    "Single concrete English food noun suitable for image search (e.g. 'eggs', 'sourdough bread', 'chicken breast', 'ramen'). No adjectives, no brands."
+            }
+        },
+        required: ["keyword"]
+    };
+
     try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash-image',
-            contents: {
-                parts: [
-                    { text: `A photorealistic, appetizing, professional food photography close-up shot of ${prompt}. Isolated on a clean, bright, soft-colored background. High quality, delicious.` }
-                ]
+        const res = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: `Extract ONE concrete food keyword in English for image search.
+Input: "${input}"
+Rules:
+- Output ONE noun phrase
+- Must describe FOOD
+- No brands
+- No packaging
+- No explanations`,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: schema
             }
         });
 
-        // The response will contain the image in the parts
-        if (response.candidates && response.candidates[0].content && response.candidates[0].content.parts) {
-            for (const part of response.candidates[0].content.parts) {
-                if (part.inlineData && part.inlineData.data) {
-                    return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-                }
+        if (res.text) {
+            const parsed = JSON.parse(cleanJson(res.text));
+            if (parsed.keyword && typeof parsed.keyword === "string") {
+                return parsed.keyword.toLowerCase();
             }
         }
     } catch (e) {
-        console.error("Image generation failed:", e);
+        // ignore AI failure
     }
-    return null;
-}
+
+    return "food";
+};
+
+// --- 6. AI Image Search Keyword Selection (AI for food concept, public image for photo) ---
+export const generateGroceryImage = async (prompt: string): Promise<string | null> => {
+    // 1) Normalize prompt to a small keyword
+    const normalize = (s: string) => {
+        if (!s) return '';
+        let t = s.toLowerCase().trim();
+        // remove punctuation
+        t = t.replace(/["'`…«»(),.?!:;\/\\]/g, '');
+        // replace multiple spaces
+        t = t.replace(/\s+/g, ' ');
+        return t;
+    };
+
+    const keyword = normalize(prompt).split(' ')[0] || 'food';
+
+    // 2) curated mapping for common grocery items to more precise search keywords
+    const curated: Record<string, string> = {
+        egg: 'eggs',
+        eggs: 'eggs',
+        milk: 'milk',
+        bread: 'bread',
+        butter: 'butter',
+        cheese: 'cheese',
+        apple: 'apples',
+        apples: 'apples',
+        banana: 'bananas',
+        tomato: 'tomato',
+        tomatoes: 'tomatoes',
+        cucumber: 'cucumber',
+        rice: 'rice',
+        chicken: 'chicken',
+        pork: 'pork',
+        beef: 'beef',
+        yogurt: 'yogurt',
+        coffee: 'coffee',
+        tea: 'tea',
+        orange: 'orange',
+        potato: 'potato',
+        potatoes: 'potatoes',
+        onion: 'onion',
+        garlic: 'garlic',
+        applejuice: 'apple juice',
+        juice: 'juice',
+        cereal: 'cereal'
+    };
+
+    let key = curated[keyword];
+
+    if (!key) {
+        key = await inferImageKeywordWithAI(prompt);
+    }
+
+    // 3) Candidate public image sources (no API key required)
+    // - source.unsplash.com returns a relevant image for a keyword
+    // - loremflickr is a fallback that uses the keyword
+    // We return the first candidate URL; the browser will fetch it.
+
+    // Use Unsplash Source (no API key) — good quality and relevant
+    const unsplash = `https://source.unsplash.com/800x600/?${encodeURIComponent(key)}`;
+
+    // Fallback to LoremFlickr (keyword-based)
+    const lorem = `https://loremflickr.com/800/600/${encodeURIComponent(key)}`;
+
+    // Final fallback: a neutral food placeholder
+    const placeholder = `https://loremflickr.com/800/600/food`;
+
+    try {
+        return unsplash;
+    } catch (e) {
+        try {
+            return lorem;
+        } catch (e2) {
+            return placeholder;
+        }
+    }
+};
 
 // --- 7. Live Connection Factory ---
 export const connectToLiveChef = (
@@ -575,7 +670,7 @@ export const categorizeBatch = async (itemNames: string[]): Promise<Record<strin
         if (isOverloadedError(e)) {
             try {
                 response = await ai.models.generateContent({
-                    model: 'gemini-1.5-flash',
+                    model: 'gemini-1.5-pro',
                     contents: `Categorize these grocery items correctly. Items: ${uniqueNames.join(', ')}`,
                     config: {
                         responseMimeType: "application/json",
