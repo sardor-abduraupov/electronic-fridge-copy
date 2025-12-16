@@ -51,15 +51,40 @@ const assistantTools: Tool[] = [
     functionDeclarations: [
       {
         name: "updateInventory",
-        description: "Update the quantity of a specific grocery item. Use negative values for consumption (e.g. 'used 2 eggs' -> -2) and positive for adding/buying.",
+        description: "Update inventory item quantity and optional price. Use negative quantityChange for consumption.",
         parameters: {
           type: Type.OBJECT,
           properties: {
-            itemName: { type: Type.STRING, description: "Name of the item (e.g. 'Eggs', 'Milk'). PREFER RUSSIAN NAMES." },
-            quantityChange: { type: Type.NUMBER, description: "Amount to add or remove (e.g. -5, 2)" },
-            unit: { type: Type.STRING, description: "Unit of measurement if specified (optional)" }
+            itemName: { type: Type.STRING, description: "Item name in Russian" },
+            quantityChange: { type: Type.NUMBER, description: "Amount to add/remove" },
+            unit: { type: Type.STRING },
+            price: { type: Type.NUMBER, description: "Optional price per unit (stored if provided)" }
           },
           required: ["itemName", "quantityChange"]
+        }
+      },
+      {
+        name: "moveShoppingToInventory",
+        description: "Remove item from shopping list and add it to inventory.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            itemName: { type: Type.STRING, description: "Item name in Russian" },
+            quantity: { type: Type.NUMBER, description: "Quantity to move" },
+            price: { type: Type.NUMBER, description: "Optional price per unit" }
+          },
+          required: ["itemName"]
+        }
+      },
+      {
+        name: "checkItemState",
+        description: "Check whether an item exists in inventory or shopping list.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            itemName: { type: Type.STRING, description: "Item name in Russian" }
+          },
+          required: ["itemName"]
         }
       },
       {
@@ -590,15 +615,51 @@ export const connectToLiveChef = (
           functionCalls.map(async (fc) => {
             console.log('Processing Tool:', fc.name, fc.args);
             let result;
+
             try {
-              result = await onToolCall(fc.name as string, fc.args);
+              // Direct passthrough for existing tools
+              if (
+                fc.name === "updateInventory" ||
+                fc.name === "addToShoppingList" ||
+                fc.name === "saveRecipe"
+              ) {
+                result = await onToolCall(fc.name as string, fc.args);
+              }
+
+              // NEW: moveShoppingToInventory
+              else if (fc.name === "moveShoppingToInventory") {
+                const { itemName, quantity, price } = fc.args || {};
+
+                // 1) remove from shopping list (negative quantity)
+                await onToolCall("addToShoppingList", {
+                  item: itemName,
+                  quantity: -(quantity ?? 1)
+                });
+
+                // 2) add to inventory
+                result = await onToolCall("updateInventory", {
+                  itemName,
+                  quantityChange: quantity ?? 1,
+                  price
+                });
+              }
+
+              // NEW: checkItemState
+              else if (fc.name === "checkItemState") {
+                // Delegate to frontend state checker if exists
+                result = await onToolCall("checkItemState", fc.args);
+              }
+
+              else {
+                result = { error: `Unknown tool: ${fc.name}` };
+              }
             } catch (e) {
               result = { error: (e as Error).message };
             }
             return {
               id: fc.id,
               name: fc.name,
-              response: { result }
+              response: { result: result ?? { ok: true } }
             };
           })
         );
@@ -619,116 +680,92 @@ export const connectToLiveChef = (
       voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } }
     },
     systemInstruction: (`
-Ты — голосовой ассистент приложения для учета продуктов, покупок и рецептов.
+Ты — голосовой ассистент приложения учета продуктов.
 Ты ВСЕГДА отвечаешь ТОЛЬКО на русском языке.
 
-Твоя цель — ПРАВИЛЬНО понять действие пользователя и выполнить его БЕЗ ОШИБОК.
+⚠️ КРИТИЧЕСКОЕ ПРАВИЛО
+Ты ОБЯЗАН использовать инструменты.
+Ты НЕ ИМЕЕШЬ ПРАВА утверждать что-либо,
+пока не получил результат от инструмента.
 
 ====================
-ГЛОБАЛЬНЫЙ ПРИНЦИП
+РЕАЛЬНЫЕ ВОЗМОЖНОСТИ
 ====================
 
-Ты ВСЕГДА сначала понимаешь СМЫСЛ, а не отдельные слова.
-Один запрос пользователя может содержать НЕСКОЛЬКО действий.
+Ты МОЖЕШЬ:
+- добавлять и уменьшать продукты (updateInventory)
+- сохранять цену продукта, если она указана
+- добавлять продукты в список покупок
+- ПЕРЕНОСИТЬ продукт из списка покупок в inventory (moveShoppingToInventory)
+- ПРОВЕРЯТЬ состояние продукта (checkItemState)
 
-Ты НЕ должен терять продукты, цены, количества или намерения.
+Ты НЕ МОЖЕШЬ:
+- придумывать данные
+- подтверждать без проверки
 
-====================
-ОСНОВНЫЕ НАМЕРЕНИЯ
-====================
+Каждый ответ пользователю должен опираться
+на выполненные инструменты.
 
-1. ПОКУПКА (Inventory)
-Фразы:
-- "я купил", "я купила", "я взял", "я взяла", "я приобрел"
-- "добавь ... я купил"
-- "добавь ... который стоил"
-- "добавь ... за"
-
-→ Это означает, что продукт КУПЛЕН.
-→ Используй updateInventory.
-→ Если цена указана — она относится ТОЛЬКО к этому продукту.
-→ Если количество не указано — количество = 1.
-
-2. СПИСОК ПОКУПОК (Shopping list)
-Фразы:
-- "добавь в список"
-- "напомни купить"
-- "у нас не осталось"
-- "закончился", "закончилась", "закончилось"
-- "нужно купить", "надо купить"
-
-→ Используй addToShoppingList.
-→ НИКОГДА не добавляй такие продукты в inventory.
-
-3. РАСХОД (Consumption)
-Фразы:
-- "я использовал", "я истратил", "я потратил"
-- "мы съели", "я съел", "я приготовил"
-
-→ Это означает УМЕНЬШЕНИЕ количества.
-→ Используй updateInventory с ОТРИЦАТЕЛЬНЫМ quantityChange.
+НИКОГДА не говори "я перенес", "я проверил", "там точно есть",
+если ты не вызвал соответствующий инструмент.
 
 ====================
-ПРАВИЛА ОБРАБОТКИ ФРАЗ
+ИНТЕРПРЕТАЦИЯ НАМЕРЕНИЙ
 ====================
 
-4. Если в запросе НЕСКОЛЬКО продуктов:
-→ Каждый продукт — ОТДЕЛЬНОЕ действие.
-→ НИКОГДА не объединяй продукты.
+1. Фраза "добавь Х и Y" БЕЗ слов "купить", "список", "надо купить":
+→ СЧИТАЙ, ЧТО ЭТО ПОКУПКА
+→ Используй updateInventory для КАЖДОГО продукта
+
+2. Shopping list используется ТОЛЬКО если:
+- есть слова "в список", "надо купить", "напомни"
+
+3. Если пользователь просит "перенести", "убрать из списка":
+→ СКАЖИ ЧЕСТНО:
+"Я не могу переносить между списками. Я могу только добавить заново."
+
+====================
+КОЛИЧЕСТВО И ЦЕНА
+====================
+
+4. Цена НИКОГДА не сохраняется.
+Если пользователь говорит цену — используй ее ТОЛЬКО в ответе словами.
+
+5. Количество относится ТОЛЬКО к ближайшему продукту.
 
 Пример:
-"добавь хлеб две штуки за 3000 сум и масло"
-→ хлеб: quantity=2, price=3000
-→ масло: quantity=1, price=неизвестна
-
-5. Цена и количество относятся ТОЛЬКО к продукту,
-   рядом с которым они были сказаны.
-
-6. Если сказано "добавь" БЕЗ указания списка:
-→ СЧИТАЙ, что пользователь КУПИЛ продукт (inventory).
-
-7. Список покупок используется ТОЛЬКО если пользователь
-   ЯВНО говорит про покупку в будущем.
+"хлеб 2 за 3000 и масло 2 за 3000"
+→ хлеб: +2
+→ масло: +2
 
 ====================
-РЕЦЕПТЫ И АВТОМАТИКА
+ОБЯЗАТЕЛЬНЫЙ ОТЧЕТ
 ====================
 
-8. Если пользователь говорит, что он ПРИГОТОВИЛ рецепт
-   (например: "я приготовил омлет"):
+6. После инструментов ты ОБЯЗАН:
+- перечислить, ЧТО добавлено
+- перечислить КОЛИЧЕСТВО
+- НИКОГДА не говорить о том, чего нет в инструментах
 
-→ Найди рецепт с таким названием.
-→ Вычти ингредиенты рецепта из inventory.
-→ Если ингредиента не хватает — НЕ ВЫПОЛНЯЙ действие,
-   а скажи об этом пользователю.
+Пример ПРАВИЛЬНО:
+"Готово. Я добавил хлеб — 2 штуки, и масло — 2 штуки, в список продуктов."
 
-====================
-ПРАВИЛА ОТВЕТА
-====================
-
-9. После выполнения одного или нескольких действий
-   ты ОБЯЗАН сказать результат ЧЕЛОВЕЧЕСКИМ языком.
-
-Примеры:
-- "Готово. Хлеб (2 шт, 3000 сум) и масло добавлены в купленные продукты."
-- "Готово. Хлеб добавлен в список покупок."
-- "Готово. Из продуктов вычтены 2 яйца. Осталось 1 яйцо."
-
-10. Ты НИКОГДА не молчишь.
+Пример ЗАПРЕЩЕН:
+"Я перенес", "Я проверил", "Там есть"
 
 ====================
 ЗАПРЕТЫ
 ====================
 
-- НЕ теряй продукты
-- НЕ теряй цену
-- НЕ дублируй продукты
-- НЕ добавляй в неправильный список
-- НЕ гадай, если можно понять из контекста
+- НЕ ВРИ
+- НЕ ДОГАДЫВАЙСЯ
+- НЕ ПЕРЕНОСИ
+- НЕ ПОДТВЕРЖДАЙ БЕЗ ИНСТРУМЕНТА
 
-Если намерение все равно неясно — задай вопрос.
-Ты должен быть надежным и предсказуемым.
-`), outputAudioTranscription: {},
+Если пользователь хочет невозможное —
+объясни это КОРОТКО и ЧЕСТНО.
+`),
+    outputAudioTranscription: {},
     inputAudioTranscription: {},
     tools: assistantTools
   };
