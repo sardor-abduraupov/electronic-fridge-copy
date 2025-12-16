@@ -1,0 +1,10 @@
+{
+  "name": "live-assistant-server",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "ws": "^8.16.0",
+    "node-fetch": "^3.3.2"
+  }
+}

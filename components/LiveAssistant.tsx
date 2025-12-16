@@ -1,58 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { connectToLiveChef } from '../services/geminiService';
 import { Mic, MicOff, X, Zap, Activity, Radio, WifiOff } from 'lucide-react';
-import { Blob } from '@google/genai';
 
-// --- Audio Utils ---
-function encode(bytes: Uint8Array) {
-  let binary = '';
-  const len = bytes.byteLength;
-  for (let i = 0; i < len; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
-
-function decode(base64: string) {
-  const binaryString = atob(base64);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return bytes;
-}
-
-async function decodeAudioData(
-  data: Uint8Array,
-  ctx: AudioContext,
-  sampleRate: number,
-  numChannels: number,
-): Promise<AudioBuffer> {
-  const dataInt16 = new Int16Array(data.buffer);
-  const frameCount = dataInt16.length / numChannels;
-  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
-
-  for (let channel = 0; channel < numChannels; channel++) {
-    const channelData = buffer.getChannelData(channel);
-    for (let i = 0; i < frameCount; i++) {
-      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
-    }
-  }
-  return buffer;
-}
-
-function createBlob(data: Float32Array): Blob {
-    const l = data.length;
-    const int16 = new Int16Array(l);
-    for (let i = 0; i < l; i++) {
-      int16[i] = data[i] * 32768;
-    }
-    return {
-      data: encode(new Uint8Array(int16.buffer)),
-      mimeType: 'audio/pcm;rate=16000',
-    };
-}
 
 interface Props {
   isActive: boolean;
@@ -76,7 +24,7 @@ const LiveAssistant: React.FC<Props> = ({ isActive, onClose, onToolUse }) => {
   const animationFrameRef = useRef<number | null>(null);
 
   const nextStartTimeRef = useRef<number>(0);
-  const sessionRef = useRef<any>(null); 
+  const sessionRef = useRef<WebSocket | null>(null);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -207,30 +155,26 @@ const LiveAssistant: React.FC<Props> = ({ isActive, onClose, onToolUse }) => {
   }, [isConnected]);
 
   const disconnect = () => {
-    if (sessionRef.current) {
-      sessionRef.current.close();
-      sessionRef.current = null;
-    }
-    sourcesRef.current.forEach(s => s.stop());
-    sourcesRef.current.clear();
-    
+    sessionRef.current?.close();
+    sessionRef.current = null;
+
     if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-        streamRef.current = null;
+      streamRef.current.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
     }
 
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-        try { audioContextRef.current.close(); } catch(e) { console.warn(e); }
-    }
     if (inputContextRef.current && inputContextRef.current.state !== 'closed') {
-        try { inputContextRef.current.close(); } catch(e) { console.warn(e); }
+      inputContextRef.current.close();
     }
-    
-    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-    
+
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+
     setIsConnected(false);
-    setStatusText("Сеанс завершен");
-    setInteractionState('idle');
+    setInteractionState("idle");
+    setStatusText("Отключено");
   };
 
   useEffect(() => {
@@ -245,106 +189,81 @@ const LiveAssistant: React.FC<Props> = ({ isActive, onClose, onToolUse }) => {
   const startSession = async () => {
     try {
       setStatusText("Подключение...");
-      
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-      
+      const audioCtx = new AudioContext({ sampleRate: 16000 });
       if (audioCtx.state === 'suspended') await audioCtx.resume();
-      if (inputCtx.state === 'suspended') await inputCtx.resume();
+      inputContextRef.current = audioCtx;
 
-      audioContextRef.current = audioCtx;
-      inputContextRef.current = inputCtx;
-      
-      // Setup Output Analyser
-      const outputAnalyser = audioCtx.createAnalyser();
-      outputAnalyser.fftSize = 256; 
-      outputAnalyser.smoothingTimeConstant = 0.5;
-      outputAnalyserRef.current = outputAnalyser;
-      outputAnalyser.connect(audioCtx.destination);
+      const ws = new WebSocket("ws://localhost:8787");
+      sessionRef.current = ws;
 
-      nextStartTimeRef.current = 0;
-
-      const session = await connectToLiveChef(
-        // async (base64Audio) => {
-        //    if (!audioContextRef.current || audioContextRef.current.state === 'closed') return;
-           
-        //    nextStartTimeRef.current = Math.max(nextStartTimeRef.current, audioContextRef.current.currentTime);
-           
-        //    try {
-        //        const audioBuffer = await decodeAudioData(
-        //            decode(base64Audio),
-        //            audioContextRef.current,
-        //            24000,
-        //            1
-        //        );
-               
-        //        const source = audioContextRef.current.createBufferSource();
-        //        source.buffer = audioBuffer;
-        //        // Connect to Analyser which connects to destination
-        //        if (outputAnalyserRef.current) {
-        //            source.connect(outputAnalyserRef.current);
-        //        } else {
-        //            source.connect(audioContextRef.current.destination);
-        //        }
-               
-        //        source.addEventListener('ended', () => {
-        //          sourcesRef.current.delete(source);
-        //        });
-               
-        //        source.start(nextStartTimeRef.current);
-        //        nextStartTimeRef.current += audioBuffer.duration;
-        //        sourcesRef.current.add(source);
-        //    } catch (e) {
-        //        console.error("Audio decode error:", e);
-        //    }
-        // },
-        // (text, isUser) => {
-        //     setTranscripts(prev => [...prev, { user: isUser, text }]);
-        // },
-        // async (name, args) => {
-        //     return await toolCallbackRef.current(name, args);
-        // },
-        // () => {
-        //     setIsConnected(false);
-        //     setStatusText("Отключено");
-        // }
-      );
-
-      sessionRef.current = session;
-      setIsConnected(true);
-      setStatusText("Готов к работе");
-
-      // Setup Input Processing & Analyser
-      const source = inputCtx.createMediaStreamSource(stream);
-      
-      const inputAnalyser = inputCtx.createAnalyser();
-      inputAnalyser.fftSize = 256;
-      inputAnalyser.smoothingTimeConstant = 0.5;
-      inputAnalyserRef.current = inputAnalyser;
-      
-      const processor = inputCtx.createScriptProcessor(4096, 1, 1);
-      
-      processor.onaudioprocess = (e) => {
-        if (!sessionRef.current) return;
-        const inputData = e.inputBuffer.getChannelData(0);
-        const pcmBlob = createBlob(inputData);
-        sessionRef.current.sendRealtimeInput({ media: pcmBlob });
+      ws.onopen = () => {
+        setIsConnected(true);
+        setStatusText("Готов к работе");
+        ws.send(JSON.stringify({ type: "start" }));
       };
 
-      // Chain
-      source.connect(inputAnalyser);
-      inputAnalyser.connect(processor);
-      processor.connect(inputCtx.destination);
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
 
-      // Start Visualizer
+        if (msg.type === "delta") {
+          setTranscripts(prev => {
+            const last = prev[prev.length - 1];
+            if (last && !last.user) {
+              return [...prev.slice(0, -1), { user: false, text: last.text + msg.text }];
+            }
+            return [...prev, { user: false, text: msg.text }];
+          });
+        }
+
+        if (msg.type === "done") {
+          setInteractionState("idle");
+        }
+
+        if (msg.type === "tool") {
+          toolCallbackRef.current(msg.name, msg.args);
+        }
+      };
+
+      ws.onerror = () => {
+        setStatusText("Ошибка соединения");
+        disconnect();
+      };
+
+      const source = audioCtx.createMediaStreamSource(stream);
+      const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+
+      processor.onaudioprocess = (e) => {
+        if (!sessionRef.current || sessionRef.current.readyState !== WebSocket.OPEN) return;
+
+        const input = e.inputBuffer.getChannelData(0);
+        const pcm16 = new Int16Array(input.length);
+        for (let i = 0; i < input.length; i++) {
+          pcm16[i] = Math.max(-1, Math.min(1, input[i])) * 32767;
+        }
+
+        const base64 = btoa(
+          String.fromCharCode(...new Uint8Array(pcm16.buffer))
+        );
+
+        sessionRef.current.send(JSON.stringify({
+          type: "audio",
+          audio: base64,
+          mimeType: "audio/pcm;rate=16000"
+        }));
+      };
+
+      source.connect(processor);
+      processor.connect(audioCtx.destination);
+
       startVisualizer();
-      
+
     } catch (err) {
       console.error("Failed to start live session", err);
-      disconnect(); 
+      disconnect();
       setStatusText("Ошибка доступа к микрофону");
     }
   };
