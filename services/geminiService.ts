@@ -4,9 +4,16 @@ import { Category, Recipe } from '../types';
 // ===============================
 // DIRECT GEMINI API KEY (FRONTEND)
 // ===============================
-// NOTE: This key is intentionally embedded for direct browser use.
-// Replace the placeholder string with your real Gemini API key.
-const GEMINI_API_KEY = "AIzaSyBCshXJDXCoRO4x_uq-fcz8go6ae0XA6yE";
+// NOTE: This key is intentionally loaded from environment or window for direct browser use.
+// Do not hard-code your real Gemini API key here.
+const GEMINI_API_KEY =
+  (import.meta as any).env?.VITE_GEMINI_API_KEY ||
+  (window as any).__GEMINI_API_KEY__ ||
+  "";
+
+if (!GEMINI_API_KEY) {
+  console.warn("Gemini API key is missing");
+}
 
 const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
