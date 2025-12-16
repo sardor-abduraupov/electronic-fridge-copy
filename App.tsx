@@ -917,6 +917,40 @@ export default function App() {
 
   // --- VIEWS ---
 
+  // Reset all data handler (cloud + local)
+  const resetAllData = async () => {
+    if (!confirm('Это полностью удалит данные на ВСЕХ устройствах (облако + локально). Продолжить?')) {
+      return;
+    }
+
+    const emptyState: AppState = {
+      inventory: [],
+      shoppingList: [],
+      recipes: [],
+      expenses: [],
+      updatedAt: Date.now()
+    };
+
+    // Immediately reset local state
+    setInventory([]);
+    setShoppingList([]);
+    setRecipes([]);
+    setExpenses([]);
+    setDismissedItems([]);
+    setLastSyncTime(emptyState.updatedAt);
+    setSyncStatus('syncing');
+
+    // Force cloud overwrite (single source of truth)
+    const success = await updateFamilyData(emptyState);
+    setSyncStatus(success ? 'synced' : 'offline');
+
+    alert(
+      success
+        ? 'Все данные удалены локально и в облаке.'
+        : 'Локальные данные очищены, но облако недоступно.'
+    );
+  };
+
   const renderDashboard = () => {
     const filteredInventory = inventory.filter(item => {
         const isAvailable = item.quantity > 0;
@@ -1307,7 +1341,26 @@ export default function App() {
     </div>
   );
 
-  const renderStats = () => (<div className="p-4 pt-20 pb-40"><ExpenseAnalytics expenses={expenses} recipes={recipes} /></div>);
+  const renderStats = () => (
+    <div className="p-4 pt-20 pb-40 space-y-6">
+      <ExpenseAnalytics expenses={expenses} recipes={recipes} />
+
+      <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-rose-100 dark:border-rose-900/40">
+        <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-2">
+          Сброс данных
+        </h3>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+          Это действие полностью очистит холодильник, список покупок, рецепты и статистику.
+        </p>
+        <button
+          onClick={resetAllData}
+          className="w-full py-4 bg-rose-500 hover:bg-rose-600 text-white rounded-2xl font-bold shadow-lg shadow-rose-500/20 transition-colors text-sm"
+        >
+          Сбросить данные приложения
+        </button>
+      </div>
+    </div>
+  );
 
   return (
     <div className="min-h-screen font-sans bg-[#F8FAFC] dark:bg-slate-950 transition-colors duration-300">
