@@ -29,6 +29,12 @@ const cleanJson = (text: string) => {
   return cleaned;
 };
 
+// --- Helper: Model Overload Detection ---
+const isOverloadedError = (e: any) =>
+  String(e?.message || "").includes("503") ||
+  String(e?.message || "").includes("UNAVAILABLE") ||
+  String(e?.error?.code || "") === "503";
+
 // --- Helper Types ---
 interface ReceiptItem {
   name: string;
@@ -162,8 +168,9 @@ export const parseVoiceInput = async (audioBase64: string, mimeType: string = 'a
     },
   };
 
+  let response;
   try {
-    const response = await ai.models.generateContent({
+    response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: {
         parts: [
@@ -186,14 +193,45 @@ export const parseVoiceInput = async (audioBase64: string, mimeType: string = 'a
         responseSchema: schema,
       },
     });
-
-    if (response.text) {
-      // Voice input usually doesn't have price, so map it with 0
-      const items = JSON.parse(cleanJson(response.text));
-      return items.map((i: any) => ({ ...i, price: 0 }));
-    }
   } catch (error) {
-    console.error("Voice parsing failed:", error);
+    if (isOverloadedError(error)) {
+      try {
+        response = await ai.models.generateContent({
+          model: 'gemini-1.5-flash',
+          contents: {
+            parts: [
+              {
+                inlineData: {
+                  mimeType: mimeType,
+                  data: audioBase64,
+                },
+              },
+              {
+                text: `Listen to this audio note describing groceries. Extract a list of items.
+                For each item, determine the category and provide an ENGLISH 'imageKeyword' for finding a photo of it.
+                IMPORTANT: If the audio is silent, unclear, or contains no grocery items, return an empty list []. Do NOT invent items.
+                `,
+              },
+            ],
+          },
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: schema,
+          },
+        });
+      } catch (error2) {
+        console.error("Voice parsing failed:", error2);
+        return [];
+      }
+    } else {
+      console.error("Voice parsing failed:", error);
+      return [];
+    }
+  }
+  if (response && response.text) {
+    // Voice input usually doesn't have price, so map it with 0
+    const items = JSON.parse(cleanJson(response.text));
+    return items.map((i: any) => ({ ...i, price: 0 }));
   }
   return [];
 };
@@ -209,8 +247,9 @@ export const getSmartItemDetails = async (itemName: string): Promise<{ category:
         required: ['category', 'imageKeyword']
     };
 
+    let response;
     try {
-        const response = await ai.models.generateContent({
+        response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: `Identify the grocery category for "${itemName}" and provide its English translation for image searching.`,
             config: {
@@ -218,12 +257,30 @@ export const getSmartItemDetails = async (itemName: string): Promise<{ category:
                 responseSchema: schema
             }
         });
-
-        if (response.text) {
-            return JSON.parse(cleanJson(response.text));
-        }
     } catch (e) {
-        console.error("Smart identification failed", e);
+        if (isOverloadedError(e)) {
+            try {
+                response = await ai.models.generateContent({
+                    model: 'gemini-1.5-flash',
+                    contents: `Identify the grocery category for "${itemName}" and provide its English translation for image searching.`,
+                    config: {
+                        responseMimeType: "application/json",
+                        responseSchema: schema
+                    }
+                });
+            } catch (e2) {
+                console.error("Smart identification failed", e2);
+                // Fallback
+                return { category: 'Other', imageKeyword: 'grocery' };
+            }
+        } else {
+            console.error("Smart identification failed", e);
+            // Fallback
+            return { category: 'Other', imageKeyword: 'grocery' };
+        }
+    }
+    if (response && response.text) {
+        return JSON.parse(cleanJson(response.text));
     }
     // Fallback
     return { category: 'Other', imageKeyword: 'grocery' };
@@ -264,8 +321,9 @@ export const generateRecipeForIngredient = async (ingredientName: string): Promi
         required: ['title', 'ingredients', 'instructions', 'imageKeyword', 'cookingTime']
     };
 
+    let response;
     try {
-        const response = await ai.models.generateContent({
+        response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: `Create a popular, delicious recipe that uses the ingredient: "${ingredientName}". 
             The recipe MUST be in Russian.
@@ -276,12 +334,31 @@ export const generateRecipeForIngredient = async (ingredientName: string): Promi
                 responseSchema: schema,
             }
         });
-        
-        if (response.text) {
-            return JSON.parse(cleanJson(response.text));
-        }
     } catch (e) {
-        console.error("Recipe generation failed:", e);
+        if (isOverloadedError(e)) {
+            try {
+                response = await ai.models.generateContent({
+                    model: 'gemini-1.5-flash',
+                    contents: `Create a popular, delicious recipe that uses the ingredient: "${ingredientName}". 
+                    The recipe MUST be in Russian.
+                    Include a short English keyword that describes the dish visually for image search.
+                    Provide a realistic cooking time estimate in minutes.`,
+                    config: {
+                        responseMimeType: "application/json",
+                        responseSchema: schema,
+                    }
+                });
+            } catch (e2) {
+                console.error("Recipe generation failed:", e2);
+                throw new Error("Не удалось создать рецепт");
+            }
+        } else {
+            console.error("Recipe generation failed:", e);
+            throw new Error("Не удалось создать рецепт");
+        }
+    }
+    if (response && response.text) {
+        return JSON.parse(cleanJson(response.text));
     }
     throw new Error("Не удалось создать рецепт");
 }
@@ -314,18 +391,39 @@ export const parseRecipe = async (input: string): Promise<Omit<Recipe, 'id' | 't
         required: ['title', 'ingredients', 'instructions', 'imageKeyword', 'cookingTime']
     };
 
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: `Extract a structured recipe from the following input. If the input is just a name (e.g. "Carbonara"), generate a standard recipe for it. 
-        ENSURE OUTPUT IS IN RUSSIAN.
-        Input: ${input}`,
-        config: {
-            responseMimeType: "application/json",
-            responseSchema: schema,
+    let response;
+    try {
+        response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: `Extract a structured recipe from the following input. If the input is just a name (e.g. "Carbonara"), generate a standard recipe for it. 
+            ENSURE OUTPUT IS IN RUSSIAN.
+            Input: ${input}`,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: schema,
+            }
+        });
+    } catch (e) {
+        if (isOverloadedError(e)) {
+            try {
+                response = await ai.models.generateContent({
+                    model: 'gemini-1.5-flash',
+                    contents: `Extract a structured recipe from the following input. If the input is just a name (e.g. "Carbonara"), generate a standard recipe for it. 
+                    ENSURE OUTPUT IS IN RUSSIAN.
+                    Input: ${input}`,
+                    config: {
+                        responseMimeType: "application/json",
+                        responseSchema: schema,
+                    }
+                });
+            } catch (e2) {
+                throw new Error("Failed to parse recipe");
+            }
+        } else {
+            throw new Error("Failed to parse recipe");
         }
-    });
-
-    if (response.text) {
+    }
+    if (response && response.text) {
         const data = JSON.parse(cleanJson(response.text));
         // Map data to match Recipe interface (handling potential extra fields from schema)
         return {
@@ -463,8 +561,9 @@ export const categorizeBatch = async (itemNames: string[]): Promise<Record<strin
         required: ['categories']
     };
 
+    let response;
     try {
-        const response = await ai.models.generateContent({
+        response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: `Categorize these grocery items correctly. Items: ${uniqueNames.join(', ')}`,
             config: {
@@ -472,17 +571,33 @@ export const categorizeBatch = async (itemNames: string[]): Promise<Record<strin
                 responseSchema: schema
             }
         });
-
-        if (response.text) {
-            const data = JSON.parse(cleanJson(response.text));
-            const mapping: Record<string, Category> = {};
-            data.categories.forEach((item: any) => {
-                mapping[item.name] = item.category as Category;
-            });
-            return mapping;
-        }
     } catch (e) {
-        console.error("Batch categorization failed", e);
+        if (isOverloadedError(e)) {
+            try {
+                response = await ai.models.generateContent({
+                    model: 'gemini-1.5-flash',
+                    contents: `Categorize these grocery items correctly. Items: ${uniqueNames.join(', ')}`,
+                    config: {
+                        responseMimeType: "application/json",
+                        responseSchema: schema
+                    }
+                });
+            } catch (e2) {
+                console.error("Batch categorization failed", e2);
+                return {};
+            }
+        } else {
+            console.error("Batch categorization failed", e);
+            return {};
+        }
+    }
+    if (response && response.text) {
+        const data = JSON.parse(cleanJson(response.text));
+        const mapping: Record<string, Category> = {};
+        data.categories.forEach((item: any) => {
+            mapping[item.name] = item.category as Category;
+        });
+        return mapping;
     }
     return {};
 };
