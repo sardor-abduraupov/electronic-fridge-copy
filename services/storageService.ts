@@ -8,7 +8,7 @@ import { InventoryItem, ShoppingItem, Recipe, ExpenseRecord } from '../types';
 // Access-Control-Allow-Origin headers.
 // Replace WORKER_PROXY with your deployed worker URL, e.g.:
 // const WORKER_PROXY = 'https://my-fridge-proxy.workers.dev/jsonblob'
-const WORKER_PROXY = 'https://electronic-fridge-worker.abduraupov-s-r.workers.dev/jsonblob';
+const WORKER_PROXY = '/jsonblob';
 
 const isProd = (typeof import.meta !== 'undefined') && !!((import.meta as any).env && (import.meta as any).env.PROD);
 const BLOB_API_URL = isProd ? WORKER_PROXY : '/jsonblob';
