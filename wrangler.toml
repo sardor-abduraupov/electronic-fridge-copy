@@ -1,0 +1,10 @@
+name = "electronic-fridge-pages"
+compatibility_date = "2025-12-16"
+
+# === Pages build output ===
+pages_build_output_dir = "dist"
+
+# === Bind Worker backend ===
+[[services]]
+binding = "API"
+service = "electronic-fridge-worker"
