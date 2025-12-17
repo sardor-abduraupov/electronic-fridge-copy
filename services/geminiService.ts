@@ -254,9 +254,23 @@ export const parseVoiceInput = async (audioBase64: string, mimeType: string = 'a
     }
   }
   if (response && response.text) {
-    // Voice input usually doesn't have price, so map it with 0
-    const items = JSON.parse(cleanJson(response.text));
-    return items.map((i: any) => ({ ...i, price: 0 }));
+    const rawItems = JSON.parse(cleanJson(response.text));
+
+    if (!Array.isArray(rawItems)) return [];
+
+    return rawItems
+      .map((i: any) => ({
+        name: typeof i?.name === "string" ? i.name.trim() : "",
+        quantity: typeof i?.quantity === "number" && !isNaN(i.quantity) ? i.quantity : 1,
+        unit: typeof i?.unit === "string" ? i.unit : "",
+        category: i?.category ?? "Other",
+        imageKeyword: typeof i?.imageKeyword === "string" && i.imageKeyword
+          ? i.imageKeyword
+          : "food",
+        price: 0
+      }))
+      // 🔒 CRITICAL: drop invalid items
+      .filter(i => i.name.length > 0);
   }
   return [];
 };
@@ -601,15 +615,19 @@ export const connectToLiveChef = (
         onAudioData(audioData);
       }
 
-      const outputText = sc?.outputTranscription?.text;
-      if (typeof outputText === "string" && outputText.trim().length > 0) {
-        onTranscription(outputText, false);
-      }
+      const safeSend = (value: any, isUser: boolean) => {
+        try {
+          const text = String(value ?? "").trim();
+          if (text.length > 0) {
+            onTranscription(text, isUser);
+          }
+        } catch {
+          // swallow EVERYTHING – UI must never crash
+        }
+      };
 
-      const inputText = sc?.inputTranscription?.text;
-      if (typeof inputText === "string" && inputText.trim().length > 0) {
-        onTranscription(inputText, true);
-      }
+      safeSend(sc?.outputTranscription?.text, false);
+      safeSend(sc?.inputTranscription?.text, true);
 
       if (msg.toolCall) {
         const functionCalls = (msg.toolCall.functionCalls || []) as any[];
