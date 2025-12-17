@@ -40,15 +40,19 @@ export default {
             headers: { Accept: "application/json" },
           });
 
-          // If blob does not exist yet or upstream fails → return empty state
           if (!res.ok) {
             return new Response("{}", { headers: cors() });
           }
 
           const text = await res.text();
-          return new Response(text || "{}", { headers: cors() });
+
+          try {
+            JSON.parse(text);
+            return new Response(text, { headers: cors() });
+          } catch {
+            return new Response("{}", { headers: cors() });
+          }
         } catch {
-          // Network / upstream error → never crash app
           return new Response("{}", { headers: cors() });
         }
       }
@@ -56,14 +60,24 @@ export default {
       // --- WRITE STATE ---
       if (request.method === "PUT") {
         try {
-          const body = await request.text();
+          const bodyText = await request.text();
+
+          try {
+            JSON.parse(bodyText);
+          } catch {
+            return new Response(
+              JSON.stringify({ ok: false, error: "Invalid JSON" }),
+              { headers: cors() }
+            );
+          }
+
           const res = await fetch(JSONBLOB_API, {
             method: "PUT",
             headers: {
               "Content-Type": "application/json",
               Accept: "application/json",
             },
-            body,
+            body: bodyText,
           });
 
           return new Response(
