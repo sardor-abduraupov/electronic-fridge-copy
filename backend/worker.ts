@@ -1,22 +1,3 @@
-// export default {
-//   async fetch(request: Request): Promise<Response> {
-//     const url = new URL(request.url);
-
-//     if (url.pathname.startsWith("/jsonblob")) {
-//       return new Response(
-//         JSON.stringify({ ok: true, source: "cloudflare-worker" }),
-//         {
-//           headers: {
-//             "Content-Type": "application/json",
-//             "Access-Control-Allow-Origin": "*",
-//           },
-//         }
-//       );
-//     }
-
-//     return new Response("Not Found", { status: 404 });
-//   },
-// };
 type Env = {
   GEMINI_API_KEY?: string;
 };
@@ -52,29 +33,49 @@ export default {
 
     // --- jsonblob proxy ---
     if (url.pathname === "/jsonblob") {
+      // --- READ STATE ---
       if (request.method === "GET") {
-        const res = await fetch(JSONBLOB_API, {
-          headers: { Accept: "application/json" },
-        });
-        const text = await res.text();
-        return new Response(text || "{}", { headers: cors() });
+        try {
+          const res = await fetch(JSONBLOB_API, {
+            headers: { Accept: "application/json" },
+          });
+
+          // If blob does not exist yet or upstream fails → return empty state
+          if (!res.ok) {
+            return new Response("{}", { headers: cors() });
+          }
+
+          const text = await res.text();
+          return new Response(text || "{}", { headers: cors() });
+        } catch {
+          // Network / upstream error → never crash app
+          return new Response("{}", { headers: cors() });
+        }
       }
 
+      // --- WRITE STATE ---
       if (request.method === "PUT") {
-        const body = await request.text();
-        const res = await fetch(JSONBLOB_API, {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-          body,
-        });
+        try {
+          const body = await request.text();
+          const res = await fetch(JSONBLOB_API, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+            body,
+          });
 
-        return new Response(
-          JSON.stringify({ ok: res.ok }),
-          { headers: cors() }
-        );
+          return new Response(
+            JSON.stringify({ ok: res.ok }),
+            { headers: cors() }
+          );
+        } catch {
+          return new Response(
+            JSON.stringify({ ok: false }),
+            { headers: cors() }
+          );
+        }
       }
 
       return new Response("Method Not Allowed", { status: 405, headers: cors() });
