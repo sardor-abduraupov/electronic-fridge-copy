@@ -3,11 +3,19 @@ import { Category, Recipe } from '../types';
 
 let GEMINI_API_KEY = "";
 
-// Async loader for API key (Worker-first, fallback-safe)
 const loadGeminiApiKey = async (): Promise<string> => {
-  // 1️⃣ Try Cloudflare Worker endpoint
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 4000);
+
   try {
-    const res = await fetch("/api/gemini-key", { credentials: "omit" });
+    // Always resolve against CURRENT origin (Pages ↔ Worker routing)
+    const res = await fetch("/api/gemini-key", {
+      method: "GET",
+      credentials: "omit",
+      cache: "no-store",
+      signal: controller.signal
+    });
+
     if (res.ok) {
       const data = await res.json();
       if (typeof data?.key === "string" && data.key.length > 10) {
@@ -15,39 +23,42 @@ const loadGeminiApiKey = async (): Promise<string> => {
       }
     }
   } catch {
-    // ignore – fallback below
+    // swallow network / QUIC / idle timeout errors
+  } finally {
+    clearTimeout(timeout);
   }
 
-  // 2️⃣ Fallback to env / window (dev only)
+  // Fallback (dev only)
   const fallback =
     (import.meta as any).env?.VITE_GEMINI_API_KEY ||
     (window as any).__GEMINI_API_KEY__ ||
     "";
 
-  if (!fallback) {
-    console.warn("Gemini API key is missing (Worker + fallback)");
-  }
-
-  return fallback;
+  return fallback || "";
 };
 
 // Lazy-initialized Gemini client
 let ai: GoogleGenAI | null = null;
 
 const getGeminiClient = async (): Promise<GoogleGenAI> => {
-  const key = await loadGeminiApiKey();
+  // Retry loop — Worker may wake up cold
+  for (let i = 0; i < 3; i++) {
+    const key = await loadGeminiApiKey();
 
-  if (!key || key.length < 10) {
-    throw new Error("Gemini API key not available yet");
+    if (key && key.length > 10) {
+      if (!ai || GEMINI_API_KEY !== key) {
+        GEMINI_API_KEY = key;
+        ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+      }
+      return ai;
+    }
+
+    // short backoff before retry
+    await new Promise(r => setTimeout(r, 300));
   }
 
-  // ⚠️ пересоздаём клиент, если ключ изменился
-  if (!ai || GEMINI_API_KEY !== key) {
-    GEMINI_API_KEY = key;
-    ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-  }
-
-  return ai;
+  // Do NOT throw — caller decides what to do
+  throw new Error("Gemini API key not available");
 };
 
 // --- Helper: Clean JSON Markdown ---
@@ -823,13 +834,19 @@ export const connectToLiveChef = (
     tools: assistantTools
   };
 
-  const sessionPromise = getGeminiClient().then(client =>
-    client.live.connect({
-      model: 'gemini-2.5-flash-native-audio-preview-09-2025',
-      callbacks,
-      config: liveConfig
-    })
-  );
+  const sessionPromise = (async () => {
+    try {
+      const client = await getGeminiClient();
+      return await client.live.connect({
+        model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+        callbacks,
+        config: liveConfig
+      });
+    } catch (e) {
+      console.warn("Live session postponed — Gemini key not ready");
+      throw e;
+    }
+  })();
 
   return sessionPromise;
 };
