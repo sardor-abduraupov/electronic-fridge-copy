@@ -35,10 +35,18 @@ const loadGeminiApiKey = async (): Promise<string> => {
 let ai: GoogleGenAI | null = null;
 
 const getGeminiClient = async (): Promise<GoogleGenAI> => {
-  if (ai) return ai;
+  const key = await loadGeminiApiKey();
 
-  GEMINI_API_KEY = await loadGeminiApiKey();
-  ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  if (!key || key.length < 10) {
+    throw new Error("Gemini API key not available yet");
+  }
+
+  // ⚠️ пересоздаём клиент, если ключ изменился
+  if (!ai || GEMINI_API_KEY !== key) {
+    GEMINI_API_KEY = key;
+    ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  }
+
   return ai;
 };
 
