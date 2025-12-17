@@ -1,21 +1,46 @@
 import { GoogleGenAI, Type, Schema, FunctionDeclaration, LiveServerMessage, Modality, Tool } from "@google/genai";
 import { Category, Recipe } from '../types';
 
-// ===============================
-// DIRECT GEMINI API KEY (FRONTEND)
-// ===============================
-// NOTE: This key is intentionally loaded from environment or window for direct browser use.
-// Do not hard-code your real Gemini API key here.
-const GEMINI_API_KEY =
-  (import.meta as any).env?.VITE_GEMINI_API_KEY ||
-  (window as any).__GEMINI_API_KEY__ ||
-  "";
+let GEMINI_API_KEY = "";
 
-if (!GEMINI_API_KEY) {
-  console.warn("Gemini API key is missing");
-}
+// Async loader for API key (Worker-first, fallback-safe)
+const loadGeminiApiKey = async (): Promise<string> => {
+  // 1️⃣ Try Cloudflare Worker endpoint
+  try {
+    const res = await fetch("/api/gemini-key", { credentials: "omit" });
+    if (res.ok) {
+      const data = await res.json();
+      if (typeof data?.key === "string" && data.key.length > 10) {
+        return data.key;
+      }
+    }
+  } catch {
+    // ignore – fallback below
+  }
 
-const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  // 2️⃣ Fallback to env / window (dev only)
+  const fallback =
+    (import.meta as any).env?.VITE_GEMINI_API_KEY ||
+    (window as any).__GEMINI_API_KEY__ ||
+    "";
+
+  if (!fallback) {
+    console.warn("Gemini API key is missing (Worker + fallback)");
+  }
+
+  return fallback;
+};
+
+// Lazy-initialized Gemini client
+let ai: GoogleGenAI | null = null;
+
+const getGeminiClient = async (): Promise<GoogleGenAI> => {
+  if (ai) return ai;
+
+  GEMINI_API_KEY = await loadGeminiApiKey();
+  ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  return ai;
+};
 
 // --- Helper: Clean JSON Markdown ---
 const cleanJson = (text: string) => {
@@ -140,7 +165,7 @@ export const analyzeReceipt = async (imageBase64: string): Promise<ReceiptItem[]
   };
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await (await getGeminiClient()).models.generateContent({
       model: 'gemini-3-pro-preview',
       contents: {
         parts: [
@@ -195,7 +220,7 @@ export const parseVoiceInput = async (audioBase64: string, mimeType: string = 'a
 
   let response;
   try {
-    response = await ai.models.generateContent({
+    response = await (await getGeminiClient()).models.generateContent({
       model: 'gemini-2.5-flash',
       contents: {
         parts: [
@@ -221,7 +246,7 @@ export const parseVoiceInput = async (audioBase64: string, mimeType: string = 'a
   } catch (error) {
     if (isOverloadedError(error)) {
       try {
-        response = await ai.models.generateContent({
+        response = await (await getGeminiClient()).models.generateContent({
           model: 'gemini-1.5-pro',
           contents: {
             parts: [
@@ -288,7 +313,7 @@ export const getSmartItemDetails = async (itemName: string): Promise<{ category:
 
   let response;
   try {
-    response = await ai.models.generateContent({
+    response = await (await getGeminiClient()).models.generateContent({
       model: 'gemini-2.5-flash',
       contents: `Identify the grocery category for "${itemName}" and provide its English translation for image searching.`,
       config: {
@@ -299,7 +324,7 @@ export const getSmartItemDetails = async (itemName: string): Promise<{ category:
   } catch (e) {
     if (isOverloadedError(e)) {
       try {
-        response = await ai.models.generateContent({
+        response = await (await getGeminiClient()).models.generateContent({
           model: 'gemini-1.5-pro',
           contents: `Identify the grocery category for "${itemName}" and provide its English translation for image searching.`,
           config: {
@@ -362,7 +387,7 @@ export const generateRecipeForIngredient = async (ingredientName: string): Promi
 
   let response;
   try {
-    response = await ai.models.generateContent({
+    response = await (await getGeminiClient()).models.generateContent({
       model: 'gemini-2.5-flash',
       contents: `Create a popular, delicious recipe that uses the ingredient: "${ingredientName}". 
             The recipe MUST be in Russian.
@@ -376,7 +401,7 @@ export const generateRecipeForIngredient = async (ingredientName: string): Promi
   } catch (e) {
     if (isOverloadedError(e)) {
       try {
-        response = await ai.models.generateContent({
+        response = await (await getGeminiClient()).models.generateContent({
           model: 'gemini-1.5-pro',
           contents: `Create a popular, delicious recipe that uses the ingredient: "${ingredientName}". 
                     The recipe MUST be in Russian.
@@ -432,7 +457,7 @@ export const parseRecipe = async (input: string): Promise<Omit<Recipe, 'id' | 't
 
   let response;
   try {
-    response = await ai.models.generateContent({
+    response = await (await getGeminiClient()).models.generateContent({
       model: 'gemini-2.5-flash',
       contents: `Extract a structured recipe from the following input. If the input is just a name (e.g. "Carbonara"), generate a standard recipe for it. 
             ENSURE OUTPUT IS IN RUSSIAN.
@@ -445,7 +470,7 @@ export const parseRecipe = async (input: string): Promise<Omit<Recipe, 'id' | 't
   } catch (e) {
     if (isOverloadedError(e)) {
       try {
-        response = await ai.models.generateContent({
+        response = await (await getGeminiClient()).models.generateContent({
           model: 'gemini-1.5-pro',
           contents: `Extract a structured recipe from the following input. If the input is just a name (e.g. "Carbonara"), generate a standard recipe for it. 
                     ENSURE OUTPUT IS IN RUSSIAN.
@@ -492,7 +517,7 @@ const inferImageKeywordWithAI = async (input: string): Promise<string> => {
   };
 
   try {
-    const res = await ai.models.generateContent({
+    const res = await (await getGeminiClient()).models.generateContent({
       model: "gemini-2.5-flash",
       contents: `Extract ONE concrete food keyword in English for image search.
 Input: "${input}"
@@ -790,11 +815,13 @@ export const connectToLiveChef = (
     tools: assistantTools
   };
 
-  const sessionPromise = ai.live.connect({
-    model: 'gemini-2.5-flash-native-audio-preview-09-2025',
-    callbacks,
-    config: liveConfig
-  });
+  const sessionPromise = getGeminiClient().then(client =>
+    client.live.connect({
+      model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+      callbacks,
+      config: liveConfig
+    })
+  );
 
   return sessionPromise;
 };
@@ -824,7 +851,7 @@ export const categorizeBatch = async (itemNames: string[]): Promise<Record<strin
 
   let response;
   try {
-    response = await ai.models.generateContent({
+    response = await (await getGeminiClient()).models.generateContent({
       model: 'gemini-2.5-flash',
       contents: `Categorize these grocery items correctly. Items: ${uniqueNames.join(', ')}`,
       config: {
@@ -835,7 +862,7 @@ export const categorizeBatch = async (itemNames: string[]): Promise<Record<strin
   } catch (e) {
     if (isOverloadedError(e)) {
       try {
-        response = await ai.models.generateContent({
+        response = await (await getGeminiClient()).models.generateContent({
           model: 'gemini-1.5-pro',
           contents: `Categorize these grocery items correctly. Items: ${uniqueNames.join(', ')}`,
           config: {
